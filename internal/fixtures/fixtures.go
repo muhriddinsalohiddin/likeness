@@ -15,6 +15,9 @@ import (
 //go:embed faces/*.png faces/*.jpg
 var faces embed.FS
 
+//go:embed closeups/*.jpg
+var closeups embed.FS
+
 //go:embed reference/*.json
 var reference embed.FS
 
@@ -49,6 +52,30 @@ func JPEG(name string) ([]byte, error) {
 	b, err := faces.ReadFile(path.Join("faces", name+".jpg"))
 	if err != nil {
 		return nil, fmt.Errorf("fixtures: no JPEG for %q", name)
+	}
+	return b, nil
+}
+
+// Closeups lists the head-and-shoulders pictures: one frontal face each,
+// about 70 pixels between the eyes, the framing of someone at a webcam.
+func Closeups() []string {
+	entries, err := fs.ReadDir(closeups, "closeups")
+	if err != nil {
+		panic(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, strings.TrimSuffix(e.Name(), path.Ext(e.Name())))
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Closeup returns the JPEG bytes of a named close-up.
+func Closeup(name string) ([]byte, error) {
+	b, err := closeups.ReadFile(path.Join("closeups", name+".jpg"))
+	if err != nil {
+		return nil, fmt.Errorf("fixtures: no close-up %q", name)
 	}
 	return b, nil
 }

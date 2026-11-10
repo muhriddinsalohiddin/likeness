@@ -17,6 +17,12 @@ NASA asks that its imagery not be used to imply endorsement, and the people
 shown keep their rights of publicity. The pictures are here only so that the
 code can be tested against known faces; do not reuse them for anything else.
 
+`closeups/` holds head-and-shoulders crops of the first two portraits, cut
+from NASA's 1280-pixel versions: one frontal face each with about 70 pixels
+between the eyes, the framing of someone sitting at a webcam. The engine
+tests degrade these (blur, exposure, scale, rotation) to check the quality
+limits.
+
 Each picture also exists as a JPEG (`faces/*.jpg`), encoded by OpenCV at
 quality 85 from the PNG. The JPEG is the production input format, and its
 decoder differs between implementations, so embeddings computed from it are

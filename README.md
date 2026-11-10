@@ -4,10 +4,11 @@ A face recognition server and Go library: send a picture, get back who it is.
 One binary, no Python, no OpenCV, and a search answer in well under 100 ms on an
 ordinary 8-core server without a GPU.
 
-> **Status: early development.** Decoding, alignment, detection and embedding
-> are in place and verified against independent implementations. The search
-> index, storage and the HTTP API are being built next — see the roadmap
-> below. Nothing here is usable as a service yet.
+> **Status: early development.** The engine works as a Go library: it reads a
+> picture, finds the faces, checks their quality and returns vectors, verified
+> against independent implementations. The search index, storage and the HTTP
+> API are being built next — see the roadmap below. Nothing here is usable as
+> a service yet.
 
 ## Why
 
@@ -53,7 +54,7 @@ On the Xeon the light models sustain about 50 requests per second with p99 under
 - [x] ONNX Runtime binding, model manifests and downloads, SCRFD and YuNet
       decoders, embedders (`internal/ortx`, `internal/models`, `internal/detect`,
       `internal/embed`)
-- [ ] engine: detect, quality checks, align, embed
+- [x] engine: detect, quality checks, align, embed (package `likeness`)
 - [ ] exact index with multiple templates per identity
 - [ ] embedded store with optional encryption at rest
 - [ ] HTTP API: search, verify, enrol, manage
@@ -61,6 +62,53 @@ On the Xeon the light models sustain about 50 requests per second with p99 under
 
 Liveness detection, GPU execution providers and an approximate index for
 millions of faces are out of scope for 0.1.
+
+## Using the engine
+
+```go
+engine, err := likeness.Open(likeness.Config{}) // the default models
+if err != nil {
+	return err
+}
+defer engine.Close()
+
+result, err := engine.Analyze(ctx, jpegBytes, likeness.ForSearch())
+if err != nil {
+	return err // not a readable picture
+}
+face, reason := result.Best()
+if reason != likeness.Accepted {
+	return fmt.Errorf("no usable face: %s", reason)
+}
+// face.Embedding is a unit vector: the dot product of two is their similarity
+```
+
+`ForSearch` is lenient, `ForEnrolment` strict: a reference picture has to be a
+sharp, well-lit, frontal face with at least 40 pixels between the eyes, alone
+in the frame. A face that falls short is not embedded, and the reason comes
+back as one of `no_face`, `multiple_faces`, `face_too_small`, `bad_pose`,
+`blurry`, `too_dark`, `too_bright`, `out_of_frame` or `low_det_score`, along
+with the measurements behind it. Every result carries the time each stage
+took.
+
+On an Apple M1 Max with four threads, one call on a 1280x720 JPEG takes 26 ms
+with the default models and 15 ms with the InsightFace `buffalo_s` pair
+(`go test -bench Analyze`). The benchmark frame is a portrait on a plain
+background; a busy scene costs a few more milliseconds of JPEG decoding.
+
+### Known limits
+
+- The default detector (YuNet) reports landmarks as if the head were upright,
+  so a head leaning more than about twenty degrees is aligned badly and its
+  vector drifts; at forty degrees it is of little use. The InsightFace
+  detectors follow the lean and do not have this problem. A permissively
+  licensed detector that does the same is on the list.
+- The default detector's file has a fixed 640x640 input and is the slowest
+  stage of the default pair; the InsightFace detectors run at 320x320 first.
+- Small faces are fragile: with 25 pixels between the eyes, ordinary JPEG
+  compression alone moves the vector noticeably. Ask for close-ups.
+- Head pose is estimated from five points and a generic head. Yaw is usable,
+  pitch is not much more than a hint.
 
 ## Verified against the originals
 

@@ -32,8 +32,9 @@ type Embedder struct {
 }
 
 type worker struct {
-	in  *ortx.Tensor
-	out ortx.Outputs
+	in   *ortx.Tensor
+	crop []float32
+	out  ortx.Outputs
 }
 
 // New loads the embedder described by m from dir.
@@ -83,31 +84,76 @@ func (e *Embedder) Fingerprint() string { return e.m.Fingerprint() }
 // Close releases the model. It must not overlap with Embed.
 func (e *Embedder) Close() { e.sess.Close() }
 
-// Embed aligns the face whose landmarks are given, runs the model and writes
-// the L2-normalised vector to dst, which must have length Dim.
-func (e *Embedder) Embed(img *vision.Image, landmarks [5]align.Point, dst []float32, o Options) error {
+// CropSize is the side of the square aligned crop the model takes.
+func (e *Embedder) CropSize() int { return e.size }
+
+// Crop writes the aligned face as raw R, G and B planes on the 0..255 scale,
+// 3*CropSize()*CropSize() values. The crop is independent of the model's own
+// normalisation, so its quality can be judged before it is embedded.
+func (e *Embedder) Crop(img *vision.Image, landmarks [5]align.Point, dst []float32, o Options) error {
 	if img == nil {
 		return errors.New("embed: nil image")
 	}
-	if len(dst) != e.dim {
-		return fmt.Errorf("embed: destination has length %d, want %d", len(dst), e.dim)
+	if len(dst) != 3*e.size*e.size {
+		return fmt.Errorf("embed: crop buffer has length %d, want %d", len(dst), 3*e.size*e.size)
 	}
 	toCrop, err := align.Crop(landmarks, e.size)
 	if err != nil {
 		return fmt.Errorf("embed: %w", err)
 	}
-	w, _ := e.pool.Get().(*worker)
-	if w == nil {
-		t, err := ortx.NewFloat32(1, 3, int64(e.size), int64(e.size))
-		if err != nil {
-			return err
-		}
-		w = &worker{in: t}
-	}
-	defer e.pool.Put(w)
-	if err := img.Warp(w.in.Float32(), e.size, toCrop, e.m.Norm, vision.Options{NoAntiAlias: o.NoAntiAlias}); err != nil {
+	if err := img.Warp(dst, e.size, toCrop, vision.RawRGB, vision.Options{NoAntiAlias: o.NoAntiAlias}); err != nil {
 		return fmt.Errorf("embed: %w", err)
 	}
+	return nil
+}
+
+// EmbedCrop runs the model on a crop made by Crop and writes the
+// L2-normalised vector to dst, which must have length Dim.
+func (e *Embedder) EmbedCrop(crop, dst []float32) error {
+	if len(crop) != 3*e.size*e.size {
+		return fmt.Errorf("embed: crop has length %d, want %d", len(crop), 3*e.size*e.size)
+	}
+	if len(dst) != e.dim {
+		return fmt.Errorf("embed: destination has length %d, want %d", len(dst), e.dim)
+	}
+	w, err := e.worker()
+	if err != nil {
+		return err
+	}
+	defer e.pool.Put(w)
+	return e.run(w, crop, dst)
+}
+
+// Embed aligns the face whose landmarks are given, runs the model and writes
+// the L2-normalised vector to dst, which must have length Dim.
+func (e *Embedder) Embed(img *vision.Image, landmarks [5]align.Point, dst []float32, o Options) error {
+	if len(dst) != e.dim {
+		return fmt.Errorf("embed: destination has length %d, want %d", len(dst), e.dim)
+	}
+	w, err := e.worker()
+	if err != nil {
+		return err
+	}
+	defer e.pool.Put(w)
+	if err := e.Crop(img, landmarks, w.crop, o); err != nil {
+		return err
+	}
+	return e.run(w, w.crop, dst)
+}
+
+func (e *Embedder) worker() (*worker, error) {
+	if w, _ := e.pool.Get().(*worker); w != nil {
+		return w, nil
+	}
+	t, err := ortx.NewFloat32(1, 3, int64(e.size), int64(e.size))
+	if err != nil {
+		return nil, err
+	}
+	return &worker{in: t, crop: make([]float32, 3*e.size*e.size)}, nil
+}
+
+func (e *Embedder) run(w *worker, crop, dst []float32) error {
+	e.m.Norm.Apply(w.in.Float32(), crop, e.size*e.size)
 	if err := e.sess.Run([]*ortx.Tensor{w.in}, &w.out); err != nil {
 		return err
 	}

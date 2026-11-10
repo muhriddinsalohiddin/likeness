@@ -24,10 +24,10 @@ type Limits struct {
 var DefaultLimits = Limits{MaxPixels: 25_000_000, MaxSide: 8192, MinSide: 16}
 
 var (
-	ErrFormat   = errors.New("vision: unsupported image format")
-	ErrTooLarge = errors.New("vision: image is larger than the configured limit")
-	ErrTooSmall = errors.New("vision: image is too small")
-	ErrCorrupt  = errors.New("vision: image data is corrupt")
+	ErrFormat   = errors.New("unsupported image format")
+	ErrTooLarge = errors.New("image is larger than the configured limit")
+	ErrTooSmall = errors.New("image is too small")
+	ErrCorrupt  = errors.New("image data is corrupt")
 )
 
 // Decode parses a JPEG, PNG or WebP picture. Zero fields of lim fall back to

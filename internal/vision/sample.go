@@ -20,6 +20,29 @@ func Uniform(mean, std float32, bgr bool) Norm {
 	return Norm{Mean: [3]float32{mean, mean, mean}, Std: [3]float32{std, std, std}, BGR: bgr}
 }
 
+// RawRGB leaves pixel values as they are: R, G and B planes on the 0..255
+// scale. A crop sampled this way can be inspected and later handed to any
+// model with Norm.Apply.
+var RawRGB = Uniform(0, 1, false)
+
+// Apply converts a RawRGB tensor of three planes of area values each into
+// the layout n describes. The result is bit-for-bit what sampling with n
+// directly would have produced.
+func (n Norm) Apply(dst, src []float32, area int) {
+	if len(src) < 3*area || len(dst) < 3*area {
+		panic("vision: tensor buffer does not match its dimensions")
+	}
+	nz := n.prepare()
+	for c := 0; c < 3; c++ {
+		in := src[c*area : (c+1)*area]
+		out := dst[nz.plane[c]*area : (nz.plane[c]+1)*area]
+		mean, inv := nz.mean[c], nz.inv[c]
+		for i, v := range in {
+			out[i] = (v - mean) * inv
+		}
+	}
+}
+
 // Options tune sampling. The zero value is what production code wants.
 type Options struct {
 	// NoAntiAlias disables the box pre-filter used when shrinking by 2x or

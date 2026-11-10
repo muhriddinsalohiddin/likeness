@@ -415,3 +415,32 @@ func TestReduceNeverDividesByZero(t *testing.T) {
 		}
 	}
 }
+
+// Sampling raw and normalising afterwards must give exactly what sampling
+// with the model's normalisation gives: the engine relies on it to judge a
+// crop before spending an inference on it.
+func TestApplyMatchesDirectSampling(t *testing.T) {
+	rng := rand.New(rand.NewSource(31))
+	m := FromImage(smoothYCbCr(rng, 300, 220, image.YCbCrSubsampleRatio420), 1)
+	toCrop := align.Affine{A: 0.4, B: -0.1, C: -10, D: 0.1, E: 0.4, F: 3}
+	const size = 64
+	for _, n := range []Norm{
+		Uniform(127.5, 127.5, false),
+		Uniform(0, 1, true),
+		{Mean: [3]float32{123.7, 116.3, 103.5}, Std: [3]float32{58.4, 57.1, 57.4}, BGR: true},
+	} {
+		direct, crop, applied := make([]float32, 3*size*size), make([]float32, 3*size*size), make([]float32, 3*size*size)
+		if err := m.Warp(direct, size, toCrop, n, Options{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Warp(crop, size, toCrop, RawRGB, Options{}); err != nil {
+			t.Fatal(err)
+		}
+		n.Apply(applied, crop, size*size)
+		for i := range direct {
+			if direct[i] != applied[i] {
+				t.Fatalf("norm %+v: value %d is %v directly and %v through Apply", n, i, direct[i], applied[i])
+			}
+		}
+	}
+}
