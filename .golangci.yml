@@ -1,0 +1,41 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - prealloc
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      exclude-functions:
+        # read-side closes and clean-ups whose errors carry no information
+        - (io.ReadCloser).Close
+        - (*os.File).Close
+        - (*compress/gzip.Reader).Close
+        - os.Remove
+  exclusions:
+    paths:
+      - bench
+    rules:
+      # cgo call sites confuse the duplicate-expression check
+      - path: internal/ortx/
+        linters: [gocritic]
+        text: dupSubExpr
+      - path: _test\.go
+        linters: [errcheck]
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - bench

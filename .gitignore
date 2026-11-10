@@ -1,0 +1,13 @@
+# model weights and native libraries are downloaded, never committed
+*.onnx
+# tiny hand-built graphs the binding tests need, no trained weights
+!internal/ortx/testdata/*.onnx
+bench/models/
+bench/lib/
+bench/vendor/
+bench/facebench
+*.tar.gz
+.DS_Store
+bench/dist/
+bin/
+coverage.out
