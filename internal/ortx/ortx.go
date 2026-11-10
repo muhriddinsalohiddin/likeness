@@ -233,6 +233,9 @@ func (rt *Runtime) NewSession(model []byte, o SessionOptions) (*Session, error) 
 	if len(model) == 0 {
 		return nil, errors.New("ortx: empty model")
 	}
+	if rt.env == nil {
+		return nil, errors.New("ortx: the runtime is closed")
+	}
 	spin, global := C.int(1), C.int(1)
 	if rt.cfg.NoSpin {
 		spin = 0
@@ -421,7 +424,8 @@ type Tensor struct {
 	dims []int64
 }
 
-// NewFloat32 allocates a zeroed tensor of the given dimensions.
+// NewFloat32 allocates a zeroed tensor of the given dimensions. The runtime
+// must have been loaded.
 func NewFloat32(dims ...int64) (*Tensor, error) {
 	if len(dims) == 0 {
 		return nil, errors.New("ortx: a tensor needs at least one dimension")

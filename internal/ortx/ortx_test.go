@@ -3,6 +3,7 @@ package ortx
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,9 +14,13 @@ import (
 
 var rt *Runtime
 
+// childMode selects what a re-executed copy of this test binary does; see
+// TestCallsBeforeLoadFailCleanly and TestClosedRuntimeRefusesSessions.
+const childMode = "LIKENESS_ORTX_TEST_CHILD"
+
 func TestMain(m *testing.M) {
 	lib := home.LibraryPath()
-	if _, err := os.Stat(lib); err == nil {
+	if _, err := os.Stat(lib); err == nil && os.Getenv(childMode) == "" {
 		r, err := Load(Config{Library: lib, Threads: 2})
 		if err != nil {
 			panic(err)
@@ -237,7 +242,76 @@ func TestConcurrentRuns(t *testing.T) {
 	}
 }
 
+// inChild re-runs the calling test in a fresh process, where TestMain leaves
+// the runtime alone, and reports whether this process is that child.
+func inChild(t *testing.T, mode string) bool {
+	t.Helper()
+	if os.Getenv(childMode) == mode {
+		return true
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v")
+	cmd.Env = append(os.Environ(), childMode+"="+mode)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child process failed: %v\n%s", err, out)
+	}
+	return false
+}
+
+// A process that never loaded the runtime (the library is missing, or the
+// caller forgot) must get errors, not a crash.
+func TestCallsBeforeLoadFailCleanly(t *testing.T) {
+	if !inChild(t, "unloaded") {
+		return
+	}
+	x, err := NewFloat32(1, 3)
+	if err == nil || !strings.Contains(err.Error(), "not loaded") {
+		t.Fatalf("NewFloat32 before Load: tensor=%v err=%v", x, err)
+	}
+	// releasing things that never came to life is harmless
+	(&Tensor{}).Close()
+	(&Session{}).Close()
+	(&Runtime{}).Close()
+	if err := (&Session{}).Run(nil, &Outputs{}); err == nil {
+		t.Fatal("running a session that was never created must be an error")
+	}
+}
+
+func TestClosedRuntimeRefusesSessions(t *testing.T) {
+	lib := home.LibraryPath()
+	if _, err := os.Stat(lib); err != nil {
+		t.Skipf("onnxruntime library not found at %s", lib)
+	}
+	if !inChild(t, "closed") {
+		return
+	}
+	r, err := Load(Config{Library: lib, Threads: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := os.ReadFile(filepath.Join("testdata", "add.onnx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	if _, err := r.NewSession(model, SessionOptions{}); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("NewSession on a closed runtime: %v", err)
+	}
+	r.Close() // idempotent
+	// the library stays mapped, so a new environment can be created
+	again, err := Load(Config{Library: lib, Threads: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := again.NewSession(model, SessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	again.Close()
+}
+
 func TestTensor(t *testing.T) {
+	runtimeOrSkip(t)
 	for _, dims := range [][]int64{nil, {0}, {-1, 2}, {1 << 20, 1 << 20}} {
 		if _, err := NewFloat32(dims...); err == nil {
 			t.Fatalf("dimensions %v must be rejected", dims)

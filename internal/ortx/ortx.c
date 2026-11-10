@@ -23,6 +23,15 @@ static char* errorf(const char* fmt, ...) {
   return strdup(buf);
 }
 
+// Every entry point that reaches the runtime starts with this: calling in
+// before ortx_load has succeeded must be an error, not a null dereference.
+#define REQUIRE_LOADED()                                  \
+  do {                                                    \
+    if (api == NULL) {                                    \
+      return errorf("the onnxruntime library is not loaded"); \
+    }                                                     \
+  } while (0)
+
 // status_error converts an OrtStatus into an owned message, or NULL.
 static char* status_error(OrtStatus* st) {
   if (st == NULL) {
@@ -71,6 +80,7 @@ const char* ortx_version(void) {
 }
 
 char* ortx_env_create(int log_severity, int global_pool, int intra_threads, int inter_threads, int spin, OrtEnv** env) {
+  REQUIRE_LOADED();
   OrtStatus* st;
   if (!global_pool) {
     st = api->CreateEnv((OrtLoggingLevel)log_severity, "likeness", env);
@@ -90,12 +100,16 @@ char* ortx_env_create(int log_severity, int global_pool, int intra_threads, int 
 }
 
 void ortx_env_release(OrtEnv* env) {
-  if (env != NULL) {
+  if (api != NULL && env != NULL) {
     api->ReleaseEnv(env);
   }
 }
 
 char* ortx_session_create(OrtEnv* env, const void* model, size_t model_len, const ortx_session_config* cfg, OrtSession** out) {
+  REQUIRE_LOADED();
+  if (env == NULL) {
+    return errorf("the onnxruntime environment is closed");
+  }
   OrtSessionOptions* so = NULL;
   OrtStatus* st = api->CreateSessionOptions(&so);
   if (st != NULL) {
@@ -119,12 +133,13 @@ char* ortx_session_create(OrtEnv* env, const void* model, size_t model_len, cons
 }
 
 void ortx_session_release(OrtSession* s) {
-  if (s != NULL) {
+  if (api != NULL && s != NULL) {
     api->ReleaseSession(s);
   }
 }
 
 char* ortx_session_count(OrtSession* s, size_t* inputs, size_t* outputs) {
+  REQUIRE_LOADED();
   OrtStatus* st = api->SessionGetInputCount(s, inputs);
   if (st == NULL) {
     st = api->SessionGetOutputCount(s, outputs);
@@ -133,6 +148,7 @@ char* ortx_session_count(OrtSession* s, size_t* inputs, size_t* outputs) {
 }
 
 char* ortx_session_info(OrtSession* s, int output, size_t index, char** name, int* elem_type, int64_t** dims, size_t* ndims) {
+  REQUIRE_LOADED();
   OrtAllocator* alloc = NULL;
   OrtStatus* st = api->GetAllocatorWithDefaultOptions(&alloc);
   if (st != NULL) {
@@ -201,6 +217,7 @@ void ortx_free_aligned(void* p) {
 }
 
 char* ortx_tensor_create(int elem_type, const int64_t* dims, size_t ndims, size_t nbytes, void** data, OrtValue** out) {
+  REQUIRE_LOADED();
   void* p = alloc_aligned(nbytes);
   if (p == NULL) {
     return errorf("out of memory allocating a %zu byte tensor", nbytes);
@@ -220,6 +237,7 @@ char* ortx_tensor_create(int elem_type, const int64_t* dims, size_t ndims, size_
 }
 
 char* ortx_value_read(OrtValue* v, int* elem_type, int64_t** dims, size_t* ndims, void** data, size_t* count) {
+  REQUIRE_LOADED();
   OrtTensorTypeAndShapeInfo* info = NULL;
   OrtStatus* st = api->GetTensorTypeAndShape(v, &info);
   if (st != NULL) {
@@ -244,12 +262,13 @@ char* ortx_value_read(OrtValue* v, int* elem_type, int64_t** dims, size_t* ndims
 }
 
 void ortx_value_release(OrtValue* v) {
-  if (v != NULL) {
+  if (api != NULL && v != NULL) {
     api->ReleaseValue(v);
   }
 }
 
 char* ortx_run(OrtSession* s, char** input_names, OrtValue** inputs, size_t ninputs, char** output_names, OrtValue** outputs, size_t noutputs) {
+  REQUIRE_LOADED();
   return status_error(api->Run(s, NULL, (const char* const*)input_names, (const OrtValue* const*)inputs, ninputs,
                                (const char* const*)output_names, noutputs, outputs));
 }
