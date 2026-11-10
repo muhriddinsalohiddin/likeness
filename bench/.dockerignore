@@ -1,0 +1,7 @@
+models/*.zip
+models/det_10g.onnx
+lib/*.tgz
+lib/onnxruntime-osx-*
+facebench
+*.tar.gz
+dist/

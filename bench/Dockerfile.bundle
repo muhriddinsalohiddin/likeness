@@ -1,0 +1,11 @@
+# Builds only the linux/amd64 binary against an older glibc (Debian 11, 2.31) so it
+# also runs on servers without Docker. Output is exported to ./dist by buildx.
+FROM golang:1.24-bullseye AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY vendor ./vendor
+COPY *.go ./
+RUN CGO_ENABLED=1 GOTOOLCHAIN=local go build -mod=vendor -trimpath -o /out/facebench .
+
+FROM scratch
+COPY --from=build /out/facebench /facebench

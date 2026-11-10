@@ -1,0 +1,96 @@
+##### host:  Intel(R) Xeon(R) Gold 6258R CPU @ 2.70GHz | nproc=8 | flags: avx2 avx512_vnni avx512f 
+facebench  linux/amd64  cpus=8  ort=1.29.0  ort-threads=8 det-threads=0 spin=false search-workers=8  go=go1.26.8
+
+== JPEG decode (Go stdlib image/jpeg) ==
+ 640x480    71 KB  mean    6.21  p50    5.92  p95    6.44  p99   11.79  max   24.19 ms
+1280x720   200 KB  mean   17.45  p50   17.35  p95   18.17  p99   20.70  max   21.90 ms
+1920x1080  440 KB  mean   39.99  p50   39.28  p95   44.23  p99   49.93  max   50.76 ms
+
+== Preprocess (pure Go, fused resize+colour+normalise) ==
+1280x720 -> 640 letterbox, 1 worker(s)  mean    5.11  p50    5.11  p95    5.27  p99    5.39  max    5.57 ms
+1280x720 -> 640 letterbox, 4 worker(s)  mean    1.45  p50    1.32  p95    1.91  p99    4.16  max    6.61 ms
+1280x720 -> 320 letterbox, 1 worker(s)  mean    1.27  p50    1.27  p95    1.32  p99    1.34  max    1.36 ms
+1280x720 -> 320 letterbox, 4 worker(s)  mean    0.41  p50    0.37  p95    0.51  p99    1.22  max    1.43 ms
+align + warp -> 112x112                 mean    0.46  p50    0.45  p95    0.49  p99    0.53  max    0.56 ms
+
+== 1:N search, 512-d, top-5, exact ==
+N=7000    pure Go                workers=1  mean    2.12  p50    1.94  p95    3.42  p99    3.62  max    3.67 ms
+N=7000    pure Go                workers=8  mean    0.54  p50    0.47  p95    1.14  p99    1.80  max    1.97 ms
+N=7000    vek32 (AVX2 on amd64)  workers=1  mean    0.70  p50    0.69  p95    0.74  p99    0.75  max    0.76 ms
+N=7000    vek32 (AVX2 on amd64)  workers=8  mean    0.28  p50    0.20  p95    0.72  p99    0.78  max    1.08 ms
+N=100000  pure Go                workers=1  mean   53.35  p50   51.58  p95   58.67  p99   63.21  max   70.15 ms
+N=100000  pure Go                workers=8  mean    9.32  p50    9.20  p95   12.29  p99   13.92  max   15.47 ms
+N=100000  vek32 (AVX2 on amd64)  workers=1  mean   36.05  p50   35.87  p95   37.32  p99   37.52  max   43.02 ms
+N=100000  vek32 (AVX2 on amd64)  workers=8  mean    6.44  p50    6.09  p95    8.65  p99    9.44  max    9.63 ms
+== Model inference, ORT threads=1 ==
+det_500m@320     in=[1 3 320 320] load=  62ms rss+  25MB  mean    6.84  p50    6.57  p95    9.27  p99   10.05  max   10.05 ms
+det_500m         in=[1 3 640 640] load=  88ms rss+  52MB  mean   27.00  p50   26.74  p95   28.50  p99   31.80  max   31.80 ms
+det_10g@320      SKIP: read model info /app/models/det_10g.onnx: Error loading temporary session: Load model from /app/models/det_10g.onnx failed:Load model /app/models/det_10g.onnx failed. File doesn't exist
+det_10g          SKIP: read model info /app/models/det_10g.onnx: Error loading temporary session: Load model from /app/models/det_10g.onnx failed:Load model /app/models/det_10g.onnx failed. File doesn't exist
+yunet_2023mar    in=[1 3 640 640] load=  46ms rss+  25MB  mean   14.07  p50   13.99  p95   15.40  p99   15.72  max   15.72 ms
+w600k_mbf        in=[1 3 112 112] load=  83ms rss+  21MB  mean   16.32  p50   16.20  p95   17.08  p99   18.36  max   18.36 ms
+w600k_r50        in=[1 3 112 112] load=1274ms rss+ 471MB  mean  355.30  p50  355.13  p95  360.09  p99  361.91  max  361.91 ms
+sface_2021dec    in=[1 3 112 112] load= 120ms rss+ -54MB  mean   35.01  p50   34.41  p95   39.12  p99   43.85  max   43.85 ms
+== Model inference, ORT threads=2 ==
+det_500m@320     in=[1 3 320 320] load=  62ms rss+  25MB  mean    5.40  p50    5.06  p95    6.52  p99    7.57  max    7.57 ms
+det_500m         in=[1 3 640 640] load=  71ms rss+  48MB  mean   17.54  p50   17.23  p95   20.51  p99   20.92  max   20.92 ms
+det_10g@320      SKIP: read model info /app/models/det_10g.onnx: Error loading temporary session: Load model from /app/models/det_10g.onnx failed:Load model /app/models/det_10g.onnx failed. File doesn't exist
+det_10g          SKIP: read model info /app/models/det_10g.onnx: Error loading temporary session: Load model from /app/models/det_10g.onnx failed:Load model /app/models/det_10g.onnx failed. File doesn't exist
+yunet_2023mar    in=[1 3 640 640] load=  41ms rss+  34MB  mean    8.48  p50    8.48  p95    9.12  p99    9.32  max    9.32 ms
+w600k_mbf        in=[1 3 112 112] load=  97ms rss+  56MB  mean   11.38  p50   11.18  p95   12.84  p99   13.57  max   13.57 ms
+w600k_r50        in=[1 3 112 112] load=1269ms rss+ 736MB  mean  184.06  p50  183.92  p95  187.42  p99  192.85  max  192.85 ms
+sface_2021dec    in=[1 3 112 112] load= 113ms rss+   0MB  mean   21.63  p50   21.50  p95   22.32  p99   22.83  max   22.83 ms
+== Model inference, ORT threads=4 ==
+det_500m@320     in=[1 3 320 320] load=  53ms rss+  25MB  mean    4.56  p50    4.55  p95    4.92  p99    5.56  max    5.56 ms
+det_500m         in=[1 3 640 640] load=  63ms rss+  37MB  mean   12.71  p50   12.59  p95   13.78  p99   15.47  max   15.47 ms
+det_10g@320      SKIP: read model info /app/models/det_10g.onnx: Error loading temporary session: Load model from /app/models/det_10g.onnx failed:Load model /app/models/det_10g.onnx failed. File doesn't exist
+det_10g          SKIP: read model info /app/models/det_10g.onnx: Error loading temporary session: Load model from /app/models/det_10g.onnx failed:Load model /app/models/det_10g.onnx failed. File doesn't exist
+yunet_2023mar    in=[1 3 640 640] load=  38ms rss+  37MB  mean    6.56  p50    6.37  p95    7.76  p99    8.57  max    8.57 ms
+w600k_mbf        in=[1 3 112 112] load=  66ms rss+   1MB  mean    9.72  p50    9.53  p95   11.14  p99   12.41  max   12.41 ms
+w600k_r50        in=[1 3 112 112] load=1006ms rss+ 444MB  mean  101.07  p50  100.11  p95  108.10  p99  116.35  max  116.35 ms
+sface_2021dec    in=[1 3 112 112] load= 147ms rss+  47MB  mean   15.11  p50   14.88  p95   16.51  p99   19.86  max   19.86 ms
+== Model inference, ORT threads=8 ==
+det_500m@320     in=[1 3 320 320] load=  67ms rss+  33MB  mean    5.17  p50    5.13  p95    5.56  p99    5.65  max    5.65 ms
+det_500m         in=[1 3 640 640] load=  59ms rss+  36MB  mean   11.68  p50   11.56  p95   12.88  p99   13.56  max   13.56 ms
+det_10g@320      SKIP: read model info /app/models/det_10g.onnx: Error loading temporary session: Load model from /app/models/det_10g.onnx failed:Load model /app/models/det_10g.onnx failed. File doesn't exist
+det_10g          SKIP: read model info /app/models/det_10g.onnx: Error loading temporary session: Load model from /app/models/det_10g.onnx failed:Load model /app/models/det_10g.onnx failed. File doesn't exist
+yunet_2023mar    in=[1 3 640 640] load=  36ms rss+  34MB  mean    6.42  p50    6.36  p95    7.29  p99    8.14  max    8.14 ms
+w600k_mbf        in=[1 3 112 112] load=  76ms rss+  21MB  mean   11.12  p50   11.12  p95   11.73  p99   13.02  max   13.02 ms
+w600k_r50        in=[1 3 112 112] load= 956ms rss+ 424MB  mean   69.38  p50   68.10  p95   82.05  p99  102.75  max  102.75 ms
+sface_2021dec    in=[1 3 112 112] load= 163ms rss+  96MB  mean   13.56  p50   13.21  p95   15.84  p99   17.40  max   17.40 ms
+== End to end, one request at a time: 200 KB JPEG -> top-5 of 100000 (dot: vek32 (AVX2 on amd64)) ==
+stage means in ms: decode / resize / detect / decode-boxes / align / embed / search
+det_500m@320+w600k_r50         mean  104.72  p50  103.51  p95  119.91  p99  129.30  max  137.20 ms
+                               18.2 / 0.5 / 5.6 / 0.01 / 0.61 / 72.0 / 7.83
+process RSS now: 929 MB (all models above + 100000-face index loaded)
+== Concurrent requests, det_500m@320+w600k_r50, 8 ORT threads shared ==
+in-flight=1      7.0 req/s  mean  134.90  p50  131.91  p95  162.55  p99  174.60  max  174.60 ms
+in-flight=2     10.3 req/s  mean  177.69  p50  177.11  p95  190.37  p99  195.99  max  195.99 ms
+in-flight=3     12.5 req/s  mean  217.11  p50  216.71  p95  236.53  p99  256.85  max  256.85 ms
+in-flight=4     13.3 req/s  mean  262.95  p50  259.76  p95  292.97  p99  306.10  max  306.10 ms
+in-flight=8     13.3 req/s  mean  481.90  p50  477.92  p95  630.46  p99  708.07  max  708.07 ms
+process RSS now: 1051 MB
+== End to end, one request at a time: 200 KB JPEG -> top-5 of 100000 (dot: vek32 (AVX2 on amd64)) ==
+stage means in ms: decode / resize / detect / decode-boxes / align / embed / search
+det_500m@320+w600k_mbf         mean   45.99  p50   46.07  p95   50.01  p99   52.65  max   52.96 ms
+                               18.3 / 0.5 / 5.7 / 0.01 / 0.61 / 12.3 / 8.51
+process RSS now: 477 MB (all models above + 100000-face index loaded)
+== Concurrent requests, det_500m@320+w600k_mbf, 8 ORT threads shared ==
+in-flight=1     13.3 req/s  mean   72.99  p50   72.99  p95   74.52  p99   76.99  max   76.99 ms
+in-flight=2     26.3 req/s  mean   73.33  p50   72.63  p95   79.15  p99   82.40  max   82.91 ms
+in-flight=3     39.0 req/s  mean   74.39  p50   73.99  p95   78.99  p99   81.53  max   85.75 ms
+in-flight=4     50.0 req/s  mean   77.80  p50   76.97  p95   84.02  p99   87.40  max  100.16 ms
+in-flight=8     71.3 req/s  mean  106.98  p50  101.34  p95  154.29  p99  196.55  max  228.20 ms
+process RSS now: 562 MB
+== End to end, one request at a time: 200 KB JPEG -> top-5 of 100000 (dot: vek32 (AVX2 on amd64)) ==
+stage means in ms: decode / resize / detect / decode-boxes / align / embed / search
+yunet_2023mar+sface_2021dec    mean   46.08  p50   45.82  p95   50.88  p99   56.27  max   56.38 ms
+                               17.9 / 1.5 / 7.1 / 0.00 / 0.67 / 16.5 / 2.47
+process RSS now: 237 MB (all models above + 100000-face index loaded)
+== Concurrent requests, yunet_2023mar+sface_2021dec, 8 ORT threads shared ==
+in-flight=1     17.2 req/s  mean   56.73  p50   56.29  p95   61.22  p99   67.40  max   74.38 ms
+in-flight=2     31.3 req/s  mean   62.39  p50   62.02  p95   67.26  p99   71.94  max   75.00 ms
+in-flight=3     42.5 req/s  mean   68.53  p50   68.09  p95   75.58  p99   80.46  max   84.94 ms
+in-flight=4     51.7 req/s  mean   74.82  p50   73.80  p95   84.85  p99   93.83  max  106.67 ms
+in-flight=8     63.2 req/s  mean  119.75  p50  115.34  p95  181.38  p99  205.57  max  226.40 ms
+process RSS now: 471 MB
