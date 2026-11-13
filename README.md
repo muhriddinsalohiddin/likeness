@@ -4,11 +4,11 @@ A face recognition server and Go library: send a picture, get back who it is.
 One binary, no Python, no OpenCV, and a search answer in well under 100 ms on an
 ordinary 8-core server without a GPU.
 
-> **Status: early development.** Two pieces work as Go libraries: the engine,
-> which reads a picture, finds the faces, checks their quality and returns
-> vectors, and the index, which finds the enrolled people most similar to a
-> vector. Storage and the HTTP API that tie them into a service are being
-> built next — see the roadmap below.
+> **Status: early development.** Three pieces work as Go libraries: the
+> engine, which reads a picture, finds the faces, checks their quality and
+> returns vectors; the index, which finds the enrolled people most similar to
+> a vector; and the store, which keeps them on disk. The HTTP API that ties
+> them into a service is being built next — see the roadmap below.
 
 ## Why
 
@@ -56,7 +56,7 @@ On the Xeon the light models sustain about 50 requests per second with p99 under
       `internal/embed`)
 - [x] engine: detect, quality checks, align, embed (package `likeness`)
 - [x] exact index with multiple templates per identity (package `index`)
-- [ ] embedded store with optional encryption at rest
+- [x] embedded store with optional encryption at rest (package `store`)
 - [ ] HTTP API: search, verify, enrol, manage
 - [ ] CLI: `setup`, `serve`, `bench`, `eval`
 
@@ -124,6 +124,43 @@ On an Apple M1 Max:
 | 100 000 | 0.56 ms | 2.0 ms |
 
 Checking one person against a probe (`Compare`) takes under a microsecond.
+
+## Keeping it
+
+```go
+st, err := store.Open("faces.db", store.Options{
+	Dim:         engine.Info().Dim,
+	Fingerprint: engine.Info().Fingerprint,
+})
+if err != nil {
+	return err
+}
+defer st.Close()
+
+tm, err := st.Add(ctx, "employee-1042", face.Embedding, nil) // on disk when it returns
+ix.Add(tm.Subject, tm.ID, face.Embedding)
+
+// when the program starts again: the index is rebuilt from the store
+st.Load(ctx, func(tm store.Template) error {
+	return ix.Add(tm.Subject, tm.ID, tm.Vector)
+})
+```
+
+The store is one file and the source of truth; the index is rebuilt from it
+at start-up, which takes 75 ms for 100 000 people on an M1 Max.
+
+- **It knows its model.** Vectors made by different models cannot be
+  compared. The store records which model made its vectors and refuses to
+  open for another one, instead of quietly returning wrong matches.
+- **It survives being killed.** A change is durable when the call returns,
+  and a batch lands whole or not at all. The test suite kills a writer
+  mid-operation, over and over, and checks every confirmed template.
+- **It can be encrypted.** With a 32-byte key, vectors and metadata are
+  sealed with AES-256-GCM, each record bound to its place so that swapping
+  two records is detected. Subject ids stay readable; use opaque ones if they
+  are sensitive.
+- **Pictures are not kept.** Only vectors and whatever small metadata the
+  caller attaches.
 
 ### Known limits
 
