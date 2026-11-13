@@ -4,11 +4,11 @@ A face recognition server and Go library: send a picture, get back who it is.
 One binary, no Python, no OpenCV, and a search answer in well under 100 ms on an
 ordinary 8-core server without a GPU.
 
-> **Status: early development.** The engine works as a Go library: it reads a
-> picture, finds the faces, checks their quality and returns vectors, verified
-> against independent implementations. The search index, storage and the HTTP
-> API are being built next — see the roadmap below. Nothing here is usable as
-> a service yet.
+> **Status: early development.** Two pieces work as Go libraries: the engine,
+> which reads a picture, finds the faces, checks their quality and returns
+> vectors, and the index, which finds the enrolled people most similar to a
+> vector. Storage and the HTTP API that tie them into a service are being
+> built next — see the roadmap below.
 
 ## Why
 
@@ -55,7 +55,7 @@ On the Xeon the light models sustain about 50 requests per second with p99 under
       decoders, embedders (`internal/ortx`, `internal/models`, `internal/detect`,
       `internal/embed`)
 - [x] engine: detect, quality checks, align, embed (package `likeness`)
-- [ ] exact index with multiple templates per identity
+- [x] exact index with multiple templates per identity (package `index`)
 - [ ] embedded store with optional encryption at rest
 - [ ] HTTP API: search, verify, enrol, manage
 - [ ] CLI: `setup`, `serve`, `bench`, `eval`
@@ -95,6 +95,35 @@ On an Apple M1 Max with four threads, one call on a 1280x720 JPEG takes 26 ms
 with the default models and 15 ms with the InsightFace `buffalo_s` pair
 (`go test -bench Analyze`). The benchmark frame is a portrait on a plain
 background; a busy scene costs a few more milliseconds of JPEG decoding.
+
+## Searching
+
+```go
+ix, err := index.New(engine.Info().Dim, index.Options{})
+if err != nil {
+	return err
+}
+defer ix.Close()
+
+ix.Add("employee-1042", 1, face.Embedding) // subject, template id, vector
+matches, err := ix.Search(probe.Embedding, 5)
+// matches[0].Subject, matches[0].Score: the most similar person
+```
+
+The search is exact: every stored vector is compared with the query, so
+there is nothing to tune and no recall to lose. A person can have several
+templates and is reported once, by the best of them. Dot products run in a
+SIMD kernel (AVX2 and FMA on x86-64, NEON on arm64) over memory kept outside
+the Go heap, and adding a template never makes a search wait.
+
+On an Apple M1 Max:
+
+| Enrolled vectors | 128 values (default models) | 512 values (InsightFace) |
+|---|---|---|
+| 7 000 | 0.11 ms | 0.22 ms |
+| 100 000 | 0.56 ms | 2.0 ms |
+
+Checking one person against a probe (`Compare`) takes under a microsecond.
 
 ### Known limits
 

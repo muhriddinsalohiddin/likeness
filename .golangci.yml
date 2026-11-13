@@ -24,7 +24,7 @@ linters:
         - os.Remove
   exclusions:
     paths:
-      - bench
+      - ^bench/
     rules:
       # cgo call sites confuse the duplicate-expression check
       - path: internal/ortx/
@@ -38,4 +38,4 @@ formatters:
     - gofmt
   exclusions:
     paths:
-      - bench
+      - ^bench/

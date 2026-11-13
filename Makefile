@@ -22,8 +22,8 @@ fuzz:
 	$(GO) test ./internal/vision -run '^$$' -fuzz FuzzExifOrientation -fuzztime $(FUZZTIME)
 
 bench:
-	$(GO) test ./internal/... -run '^$$' -bench . -benchmem
+	$(GO) test ./... -run '^$$' -bench . -benchmem
 
 tidy:
 	$(GO) mod tidy
-	gofmt -l -w cmd internal *.go
+	gofmt -l -w cmd index internal *.go
