@@ -118,11 +118,13 @@ var (
 		// OpenCV's FaceRecognizerSF swaps the channels of its BGR frames, so
 		// the network sees RGB; the detector, by contrast, is fed BGR as is.
 		Input: 112, Norm: vision.Uniform(0, 1, false), Embedding: 128,
-		// Verify is the operating point OpenCV publishes for this model on
-		// LFW. Search is our estimate: on the few test faces we have,
-		// strangers score 0.13 on average (0.35 at worst), which puts the
-		// best of several thousand strangers above 0.5.
-		Thresholds: Thresholds{Verify: 0.363, Search: 0.60},
+		// Measured on LFW (docs/accuracy.md). At 0.445 one comparison of
+		// strangers in ten thousand passes and 2.2% of genuine ones fail;
+		// the 0.363 that OpenCV publishes lets through ten times as many
+		// strangers for 0.3% fewer failures. At 0.60 a search among 4 600
+		// people names someone for 1.2% of strangers and misses 17.5% of
+		// the enrolled: this model is not one to search thousands with.
+		Thresholds: Thresholds{Verify: 0.445, Search: 0.60},
 		License:    "Apache-2.0", Source: "OpenCV Zoo (Yaoyao Zhong et al.)",
 	}
 	det500m = &Manifest{
@@ -156,8 +158,10 @@ var (
 			Size:   13616099,
 		},
 		Input: 112, Norm: vision.Uniform(127.5, 127.5, false), Embedding: 512,
-		// Strangers score 0.03 on average on our test faces (0.17 at
-		// worst); the best of several thousand lands near 0.35.
+		// Measured on LFW (docs/accuracy.md). At 0.30 one comparison of
+		// strangers in ten thousand passes and 1.0% of genuine ones fail.
+		// At 0.45 a search among 4 600 people misses 7.4% of the enrolled
+		// and names someone for 3.6% of strangers.
 		Thresholds: Thresholds{Verify: 0.30, Search: 0.45},
 		License:    "non-commercial research", NonCommercial: true, Source: "InsightFace buffalo_s",
 	}

@@ -165,7 +165,7 @@ resembles whom.
   "verified": false,
   "score": 0.0945,
   "template": 2,
-  "threshold": 0.363,
+  "threshold": 0.445,
   "face": {"box": {"left": 150.6, "top": 116.2, "right": 295.5, "bottom": 326.8},
            "quality": {"score": 0.953, "eye_distance": 69.8, "yaw": -3.1, "pitch": 10.9,
                        "roll": -0.3, "in_frame": 1, "brightness": 143.8, "sharpness": 298.6}},
@@ -316,7 +316,7 @@ A removal is on disk and out of the index when the answer arrives.
   "runtime": "1.29.0",
   "threads": 10,
   "kernel": "neon",
-  "thresholds": {"search": 0.6, "verify": 0.363},
+  "thresholds": {"search": 0.6, "verify": 0.445},
   "gallery": {"subjects": 2, "templates": 2, "encrypted": false, "created": "2026-11-13T14:56:27.442125Z"},
   "limits": {"max_body": 10485760, "max_inflight": 2, "queue": 16, "queue_timeout_ms": 50,
              "max_templates": 10, "search_limit": 50, "candidates": false}
@@ -473,11 +473,12 @@ its size, position or pose, before they were measured.
 | `--drain-delay` | 0 | keep serving this long after a stop signal while `/readyz` says 503 |
 | `--log-format`, `--log-level` | `text`, `info` | |
 
-**Thresholds are starting points.** The defaults come from the models'
-authors and from a handful of test pictures, not from your cameras and your
-people. Before relying on a match for anything that matters, measure false
-accepts and false rejects on your own pictures and set the thresholds from
-that.
+**Thresholds are starting points.** The defaults were measured on a public
+dataset ([accuracy.md](accuracy.md)), not on your cameras and your people.
+Before relying on a match for anything that matters, run `likeness eval` on
+your own pictures and set the thresholds from that. Where the person says
+who they are before they look at the camera, verify rather than search: one
+comparison goes wrong far less often than a search among thousands.
 
 **Keys and the store key** come from the environment, never from flags,
 which any user of the machine can read off the process list. Each variable

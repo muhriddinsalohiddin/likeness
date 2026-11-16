@@ -8,8 +8,9 @@ ordinary 8-core server without a GPU.
 > it: `likeness setup` fetches the models, `serve` answers search and
 > verification requests over HTTP, `enrol` imports people in bulk, `eval`
 > measures accuracy on your own pictures, `bench` and `load` measure speed.
-> What is missing is experience: the default thresholds have not been
-> calibrated on a public dataset yet, and nothing has run in production.
+> What is missing is experience: nothing has run in production yet, and the
+> permissively licensed models are good at confirming who someone is but not
+> at picking one person out of thousands ([docs/accuracy.md](docs/accuracy.md)).
 
 ## Why
 
@@ -62,7 +63,8 @@ On the Xeon the light models sustain about 50 requests per second with p99 under
       [docs/api.md](docs/api.md))
 - [x] CLI: `setup`, `enrol`, `eval`, `bench`, `load`
 - [x] a Go client for the API (package `client`)
-- [ ] thresholds measured on public data, a container image
+- [x] accuracy measured on public data ([docs/accuracy.md](docs/accuracy.md))
+- [ ] a stronger permissively licensed embedder, a container image
 
 Liveness detection, GPU execution providers and an approximate index for
 millions of faces are out of scope for 0.1.
@@ -271,11 +273,13 @@ already have gone through.
   compression alone moves the vector noticeably. Ask for close-ups.
 - Head pose is estimated from five points and a generic head. Yaw is usable,
   pitch is not much more than a hint.
-- The thresholds are provisional. They are the ones the models' authors
-  suggest, checked against a few test pictures; nobody has yet measured how
-  often the default models take one of several thousand enrolled people for
-  another. Run `likeness eval` on your own pictures before you rely on a
-  match.
+- Searching thousands of people is beyond the default models. Measured on
+  LFW ([docs/accuracy.md](docs/accuracy.md)), verification against one
+  claimed person is sound: one stranger in ten thousand passes and 2% of
+  genuine attempts fail. A search among 4 600 people at the default
+  threshold misses 17% of the enrolled. Where people can say who they are
+  first, verify; and run `likeness eval` on your own pictures before you
+  rely on a match.
 - One server per store file: there is no shared store for replicas yet.
 
 ## Verified against the originals
