@@ -64,7 +64,8 @@ On the Xeon the light models sustain about 50 requests per second with p99 under
 - [x] CLI: `setup`, `enrol`, `eval`, `bench`, `load`
 - [x] a Go client for the API (package `client`)
 - [x] accuracy measured on public data ([docs/accuracy.md](docs/accuracy.md))
-- [ ] a stronger permissively licensed embedder, a container image
+- [x] a container image (`Dockerfile`)
+- [ ] a stronger permissively licensed embedder
 
 Liveness detection, GPU execution providers and an approximate index for
 millions of faces are out of scope for 0.1.
@@ -239,6 +240,19 @@ likeness serve --store faces.db
 | `load` | sends searches to a running server at rising rates and shows where it starts to refuse and what the accepted requests experience. |
 
 Each explains itself with `-h`.
+
+### In a container
+
+```sh
+docker build -t likeness .
+docker run -p 8080:8080 -v likeness-data:/data \
+    -e LIKENESS_ADMIN_KEYS=... -e LIKENESS_SEARCH_KEYS=... likeness
+```
+
+The image carries the runtime library and the default models, so it can be
+built where there is internet access and run where there is none. It runs
+as an unprivileged user and keeps the store in `/data`. The other commands
+are there too: `docker run likeness bench`.
 
 ## Calling it from Go
 

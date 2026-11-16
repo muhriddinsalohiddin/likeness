@@ -1,0 +1,9 @@
+.git
+.github
+bench
+bin
+docs/PLAN.md
+*.onnx
+!internal/ortx/testdata/*.onnx
+coverage.out
+likeness
