@@ -56,6 +56,12 @@ type Info struct {
 	// Runtime is the version of the ONNX Runtime library in use.
 	Runtime string
 	Threads int
+	// VerifyThreshold and SearchThreshold are the similarities at which two
+	// vectors of this embedder are taken for the same person: the first
+	// when a probe is compared with one claimed subject, the second, which
+	// is stricter, when a subject is picked out of a gallery. They are
+	// starting points; measure on your own pictures before relying on them.
+	VerifyThreshold, SearchThreshold float32
 }
 
 // ErrClosed is returned by an Engine that has been closed.
@@ -174,6 +180,8 @@ func Open(cfg Config) (*Engine, error) {
 		Preset: preset.Name, Detector: preset.Detector.Name, Embedder: preset.Embedder.Name,
 		Fingerprint: e.emb.Fingerprint(), Dim: e.emb.Dim(),
 		Runtime: rt.Version(), Threads: rt.Config().Threads,
+		VerifyThreshold: preset.Embedder.Thresholds.Verify,
+		SearchThreshold: preset.Embedder.Thresholds.Search,
 	}
 	e.sizes = detectSizes(e.det)
 	cropLen := 3 * e.emb.CropSize() * e.emb.CropSize()

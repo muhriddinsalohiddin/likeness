@@ -22,6 +22,12 @@ linters:
         - (*os.File).Close
         - (*compress/gzip.Reader).Close
         - os.Remove
+        # a bufio.Writer keeps its first error and returns it from Flush
+        - (*bufio.Writer).Write
+        - (*bufio.Writer).WriteByte
+        - (*bufio.Writer).WriteString
+        # a response that cannot be written has nobody left to be told
+        - (net/http.ResponseWriter).Write
   exclusions:
     paths:
       - ^bench/

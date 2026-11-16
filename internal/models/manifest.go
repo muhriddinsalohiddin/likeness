@@ -57,12 +57,23 @@ type Manifest struct {
 	Norm    vision.Norm
 	// Embedding is the vector length of an embedder, 0 for detectors.
 	Embedding int
+	// Thresholds are the similarities at which an embedder's vectors count
+	// as the same person, until someone calibrates better ones.
+	Thresholds Thresholds
 	// License is the SPDX identifier or a short name of the weights' licence.
 	License string
 	// NonCommercial marks weights that may only be used for research; the
 	// tool asks for explicit consent before fetching them.
 	NonCommercial bool
 	Source        string // where the weights came from, for the docs
+}
+
+// Thresholds are starting points, not measurements of this code on real
+// traffic. Verify is for comparing a probe with one claimed subject. Search
+// is for picking a subject out of a gallery and has to be stricter: among
+// thousands of strangers, somebody always looks a little like the probe.
+type Thresholds struct {
+	Verify, Search float32
 }
 
 // Fingerprint identifies the weights, so that embeddings computed by one
@@ -107,7 +118,12 @@ var (
 		// OpenCV's FaceRecognizerSF swaps the channels of its BGR frames, so
 		// the network sees RGB; the detector, by contrast, is fed BGR as is.
 		Input: 112, Norm: vision.Uniform(0, 1, false), Embedding: 128,
-		License: "Apache-2.0", Source: "OpenCV Zoo (Yaoyao Zhong et al.)",
+		// Verify is the operating point OpenCV publishes for this model on
+		// LFW. Search is our estimate: on the few test faces we have,
+		// strangers score 0.13 on average (0.35 at worst), which puts the
+		// best of several thousand strangers above 0.5.
+		Thresholds: Thresholds{Verify: 0.363, Search: 0.60},
+		License:    "Apache-2.0", Source: "OpenCV Zoo (Yaoyao Zhong et al.)",
 	}
 	det500m = &Manifest{
 		Name: "det_500m", Kind: SCRFD, File: "det_500m.onnx",
@@ -140,7 +156,10 @@ var (
 			Size:   13616099,
 		},
 		Input: 112, Norm: vision.Uniform(127.5, 127.5, false), Embedding: 512,
-		License: "non-commercial research", NonCommercial: true, Source: "InsightFace buffalo_s",
+		// Strangers score 0.03 on average on our test faces (0.17 at
+		// worst); the best of several thousand lands near 0.35.
+		Thresholds: Thresholds{Verify: 0.30, Search: 0.45},
+		License:    "non-commercial research", NonCommercial: true, Source: "InsightFace buffalo_s",
 	}
 	w600kR50 = &Manifest{
 		Name: "w600k_r50", Kind: ArcFace, File: "w600k_r50.onnx",
@@ -151,7 +170,8 @@ var (
 			Size:   174383860,
 		},
 		Input: 112, Norm: vision.Uniform(127.5, 127.5, false), Embedding: 512,
-		License: "non-commercial research", NonCommercial: true, Source: "InsightFace buffalo_l",
+		Thresholds: Thresholds{Verify: 0.30, Search: 0.42},
+		License:    "non-commercial research", NonCommercial: true, Source: "InsightFace buffalo_l",
 	}
 )
 

@@ -68,6 +68,9 @@ func TestInfo(t *testing.T) {
 	if !strings.HasPrefix(got.Fingerprint, "sface:sface_2021dec:") || got.Runtime == "" {
 		t.Fatalf("%+v", got)
 	}
+	if got.VerifyThreshold <= 0 || got.SearchThreshold < got.VerifyThreshold {
+		t.Fatalf("thresholds %v and %v", got.VerifyThreshold, got.SearchThreshold)
+	}
 	other := open(t, "buffalo_s")
 	if other.Info().Fingerprint == got.Fingerprint || other.Info().Dim != 512 {
 		t.Fatalf("%+v", other.Info())

@@ -190,6 +190,9 @@ func TestManifestsAreConsistent(t *testing.T) {
 		if m.Kind.Detector() != (m.Embedding == 0) {
 			t.Fatalf("%s: detector/embedding mismatch", m.Name)
 		}
+		if th := m.Thresholds; m.Kind.Detector() != (th == Thresholds{}) || th.Search < th.Verify || th.Search >= 1 {
+			t.Fatalf("%s: thresholds %+v", m.Name, th)
+		}
 		if strings.Contains(m.Artifact.URL, ".zip") == (m.Artifact.Member == "") {
 			t.Fatalf("%s: archives need a member and plain files must not have one", m.Name)
 		}

@@ -4,11 +4,11 @@ A face recognition server and Go library: send a picture, get back who it is.
 One binary, no Python, no OpenCV, and a search answer in well under 100 ms on an
 ordinary 8-core server without a GPU.
 
-> **Status: early development.** Three pieces work as Go libraries: the
-> engine, which reads a picture, finds the faces, checks their quality and
-> returns vectors; the index, which finds the enrolled people most similar to
-> a vector; and the store, which keeps them on disk. The HTTP API that ties
-> them into a service is being built next — see the roadmap below.
+> **Status: early development.** The server runs: `likeness serve` enrols
+> people from pictures and answers search and verification requests over
+> HTTP. What is still missing is the tooling around it — a command that
+> downloads the models, one that measures accuracy on your own pictures —
+> and the thresholds have not been calibrated yet. See the roadmap below.
 
 ## Why
 
@@ -57,8 +57,10 @@ On the Xeon the light models sustain about 50 requests per second with p99 under
 - [x] engine: detect, quality checks, align, embed (package `likeness`)
 - [x] exact index with multiple templates per identity (package `index`)
 - [x] embedded store with optional encryption at rest (package `store`)
-- [ ] HTTP API: search, verify, enrol, manage
-- [ ] CLI: `setup`, `serve`, `bench`, `eval`
+- [x] HTTP API: search, verify, enrol, manage (`likeness serve`,
+      [docs/api.md](docs/api.md))
+- [ ] CLI: `setup`, `bench`, `eval`
+- [ ] thresholds measured on public data, load tests, a container image
 
 Liveness detection, GPU execution providers and an approximate index for
 millions of faces are out of scope for 0.1.
@@ -162,6 +164,63 @@ at start-up, which takes 75 ms for 100 000 people on an M1 Max.
 - **Pictures are not kept.** Only vectors and whatever small metadata the
   caller attaches.
 
+## Serving
+
+```sh
+export LIKENESS_ADMIN_KEYS=$(openssl rand -hex 32)
+export LIKENESS_SEARCH_KEYS=$(openssl rand -hex 32)
+likeness serve --store faces.db
+```
+
+```sh
+# enrol someone
+curl -H "Authorization: Bearer $LIKENESS_ADMIN_KEYS" -F image=@anna.jpg \
+     localhost:8080/v1/subjects/anna/faces
+# who is this?
+curl -H "Authorization: Bearer $LIKENESS_SEARCH_KEYS" -F image=@someone.jpg \
+     localhost:8080/v1/search
+```
+
+```json
+{
+  "faces": [{
+    "match": true,
+    "matches": [{"subject": "anna", "score": 0.9405, "template": 1}],
+    "margin": 0.8466,
+    "box": {"left": 179.8, "top": 78, "right": 236.9, "bottom": 158.8},
+    "quality": {"score": 0.944, "eye_distance": 28.4, "yaw": -4.4, "...": "..."}
+  }],
+  "threshold": 0.6,
+  "timing_ms": {"read": 0.08, "queue": 0, "decode": 2.02, "detect": 12.21,
+                "align": 0.28, "embed": 8.07, "search": 0.004, "total": 22.68}
+}
+```
+
+That answer is from an Apple M1 Max, for a 383x480 JPEG and the default
+models. The whole API is described in [docs/api.md](docs/api.md); in short:
+
+- **Search, verify, enrol.** Search names the enrolled person in a picture,
+  verify checks a picture against one claimed person, enrol adds a reference
+  picture after checking that it is good enough to be one. An enrolment
+  that would give one face to two people, or two unlike faces to one, is
+  refused unless you insist.
+- **It refuses rather than queues.** Only a few pictures are analysed at a
+  time; a request that would wait more than a moment gets a `429` at once.
+  Under more load than it can carry, the server answers fewer requests, not
+  all of them late.
+- **Keys with three levels of rights**: enrolling and removing people,
+  recognising them, reading the metrics. Nothing is served without a key
+  unless you ask for that by name.
+- **Nothing about people leaks by default.** A search names nobody below
+  the threshold; logs carry request ids, outcomes and timings, not subject
+  ids; pictures never touch the disk.
+- **It can be operated.** Prometheus metrics, a timing breakdown in every
+  answer, health endpoints, graceful shutdown, TLS, secrets read from files.
+
+`likeness setup`, which downloads the runtime library and the models, is not
+written yet. Until it is they have to be put under `$LIKENESS_HOME` by hand;
+`internal/models` has the URLs and checksums.
+
 ### Known limits
 
 - The default detector (YuNet) reports landmarks as if the head were upright,
@@ -175,6 +234,11 @@ at start-up, which takes 75 ms for 100 000 people on an M1 Max.
   compression alone moves the vector noticeably. Ask for close-ups.
 - Head pose is estimated from five points and a generic head. Yaw is usable,
   pitch is not much more than a hint.
+- The thresholds are provisional. They are the ones the models' authors
+  suggest, checked against a few test pictures; nobody has yet measured how
+  often the default models take one of several thousand enrolled people for
+  another. Measure on your own pictures before you rely on a match.
+- One server per store file: there is no shared store for replicas yet.
 
 ## Verified against the originals
 
@@ -192,9 +256,10 @@ runtime library itself is loaded when the program starts, not at link time;
 tests that need it, and the model files, skip when they are not installed.
 
 ```sh
+make build    # bin/likeness
 make test     # unit tests with the race detector
 make fuzz     # a short fuzzing pass over the image decoders
-make bench    # micro-benchmarks of the image pipeline
+make bench    # micro-benchmarks
 ```
 
 ## Models and licences
