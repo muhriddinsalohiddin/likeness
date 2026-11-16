@@ -128,6 +128,16 @@ func Load(cfg Config) (*Runtime, error) {
 // Version is the version string of the loaded library.
 func (rt *Runtime) Version() string { return rt.version }
 
+// Silenced reports whether the runtime has been told to keep to itself.
+// Its official builds report usage to their maker over the network unless
+// a switch in the environment says otherwise; Load sets it before it opens
+// the library.
+func Silenced() bool {
+	name := C.CString("ORT_DISABLE_TELEMETRY")
+	defer C.free(unsafe.Pointer(name))
+	return C.GoString(C.getenv(name)) == "1"
+}
+
 // Config returns the configuration the runtime was loaded with.
 func (rt *Runtime) Config() Config { return rt.cfg }
 

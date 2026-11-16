@@ -1,13 +1,16 @@
 package ortx
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/muhriddinsalohiddin/likeness/internal/home"
 )
@@ -61,6 +64,32 @@ func tensor(t *testing.T, values []float32, dims ...int64) *Tensor {
 	copy(x.Float32(), values)
 	t.Cleanup(func() { x.Close() })
 	return x
+}
+
+// The runtime's official builds send usage reports to their maker. A
+// program that handles faces must not talk to anyone unasked.
+func TestRuntimeKeepsToItself(t *testing.T) {
+	s := session(t, "add.onnx")
+	if !Silenced() {
+		t.Fatal("the runtime is loaded and has not been told to send no reports")
+	}
+	a, b := tensor(t, []float32{1, 2, 3}, 1, 3), tensor(t, []float32{3, 2, 1}, 1, 3)
+	var out Outputs
+	if err := s.Run([]*Tensor{a, b}, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	// Left to itself the library connects within a second of being used.
+	lsof, err := exec.LookPath("lsof")
+	if err != nil {
+		t.Skip("no lsof on this machine to look for connections with")
+	}
+	time.Sleep(1500 * time.Millisecond)
+	// lsof exits with 1 when it has nothing to list, which is the hope.
+	listed, _ := exec.Command(lsof, "-nP", "-a", "-p", strconv.Itoa(os.Getpid()), "-i").Output()
+	if len(bytes.TrimSpace(listed)) != 0 {
+		t.Errorf("the process holds network connections it never asked for:\n%s", listed)
+	}
 }
 
 func TestLoadRejectsMissingLibrary(t *testing.T) {

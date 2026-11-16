@@ -48,13 +48,18 @@ char* ortx_load(const char* path, uint32_t api_version) {
     return NULL;
   }
   const OrtApiBase* (*get_base)(void) = NULL;
+  /* The official builds of the runtime report usage to their maker over
+   * the network, and start doing so as the library initialises. This is
+   * the switch it reads, and it has to be set before the library is in. */
 #ifdef _WIN32
+  _putenv_s("ORT_DISABLE_TELEMETRY", "1");
   HMODULE h = LoadLibraryA(path);
   if (h == NULL) {
     return errorf("LoadLibrary(%s) failed with error %lu", path, GetLastError());
   }
   get_base = (const OrtApiBase * (*)(void)) GetProcAddress(h, "OrtGetApiBase");
 #else
+  setenv("ORT_DISABLE_TELEMETRY", "1", 1);
   void* h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
   if (h == NULL) {
     const char* why = dlerror();
@@ -79,12 +84,24 @@ const char* ortx_version(void) {
   return base != NULL ? base->GetVersionString() : "";
 }
 
+/* The environment is told as well, for a build that has the switch of the
+ * API but not the one of ortx_load. A program that looks at faces sends
+ * nothing anywhere on its own: an environment that cannot be silenced is
+ * not kept. */
+static OrtStatus* silence(OrtStatus* st, OrtEnv** env) {
+  if (st == NULL && (st = api->DisableTelemetryEvents(*env)) != NULL) {
+    api->ReleaseEnv(*env);
+    *env = NULL;
+  }
+  return st;
+}
+
 char* ortx_env_create(int log_severity, int global_pool, int intra_threads, int inter_threads, int spin, OrtEnv** env) {
   REQUIRE_LOADED();
   OrtStatus* st;
   if (!global_pool) {
     st = api->CreateEnv((OrtLoggingLevel)log_severity, "likeness", env);
-    return status_error(st);
+    return status_error(silence(st, env));
   }
   OrtThreadingOptions* tp = NULL;
   if ((st = api->CreateThreadingOptions(&tp)) != NULL) {
@@ -96,7 +113,7 @@ char* ortx_env_create(int log_severity, int global_pool, int intra_threads, int 
     st = api->CreateEnvWithGlobalThreadPools((OrtLoggingLevel)log_severity, "likeness", tp, env);
   }
   api->ReleaseThreadingOptions(tp);
-  return status_error(st);
+  return status_error(silence(st, env));
 }
 
 void ortx_env_release(OrtEnv* env) {
