@@ -111,6 +111,8 @@ func advice(reason likeness.Reason) string {
 		return "the face is overexposed"
 	case likeness.Blurry:
 		return "the face is not sharp"
+	case likeness.Spoof:
+		return "it looks like a picture of a face rather than a face"
 	}
 	return string(reason)
 }
@@ -242,9 +244,11 @@ type qualityJSON struct {
 
 // faceJSON is a face as it was seen in the picture.
 type faceJSON struct {
-	Box     boxJSON         `json:"box"`
-	Quality qualityJSON     `json:"quality"`
-	Reject  likeness.Reason `json:"reject,omitempty"`
+	Box     boxJSON     `json:"box"`
+	Quality qualityJSON `json:"quality"`
+	// Liveness is absent when it was not judged.
+	Liveness float64         `json:"liveness,omitempty"`
+	Reject   likeness.Reason `json:"reject,omitempty"`
 }
 
 func qualityOf(q likeness.Quality) qualityJSON {
@@ -266,8 +270,9 @@ func describe(f *likeness.Face) faceJSON {
 			Left: round(float64(f.Box.Left), 1), Top: round(float64(f.Box.Top), 1),
 			Right: round(float64(f.Box.Right), 1), Bottom: round(float64(f.Box.Bottom), 1),
 		},
-		Quality: qualityOf(f.Quality),
-		Reject:  f.Reject,
+		Quality:  qualityOf(f.Quality),
+		Liveness: round(float64(f.Liveness), 3),
+		Reject:   f.Reject,
 	}
 }
 

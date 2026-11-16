@@ -255,12 +255,13 @@ type matchView struct {
 }
 
 type faceView struct {
-	Box     map[string]float64
-	Quality map[string]float64
-	Reject  string
-	Match   bool
-	Matches []matchView
-	Margin  *float64
+	Box      map[string]float64
+	Quality  map[string]float64
+	Liveness float64
+	Reject   string
+	Match    bool
+	Matches  []matchView
+	Margin   *float64
 }
 
 type searchView struct {

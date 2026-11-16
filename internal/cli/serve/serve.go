@@ -86,6 +86,8 @@ func parseSize(text string) (int64, error) {
 func parse(args []string, env cli.Env) (*options, error) {
 	o := &options{}
 	var (
+		live           float64
+		noLive         bool
 		search, verify float64
 		maxBody        size
 		level          string
@@ -99,6 +101,8 @@ func parse(args []string, env cli.Env) (*options, error) {
 	fs.DurationVar(&o.server.QueueTimeout, "queue-timeout", 0, "longest a request may wait for a free slot (default 50ms)")
 	fs.Float64Var(&search, "search-threshold", 0, "similarity from which a search names a subject (default the model's)")
 	fs.Float64Var(&verify, "verify-threshold", 0, "similarity from which a verification passes (default the model's)")
+	fs.Float64Var(&live, "liveness-threshold", 0, "liveness below which a face is taken for a picture of one (default 0.55)")
+	fs.BoolVar(&noLive, "no-liveness", false, "do not check that faces are live: accept a photograph held up to the camera")
 	fs.Var(&maxBody, "max-body", "largest request body `size`, as in 8MB (default 10MiB)")
 	fs.IntVar(&o.server.MaxTemplates, "max-templates", 0, "templates a subject may hold, -1 for no bound (default 10)")
 	fs.BoolVar(&o.server.AllowCandidates, "allow-candidates", false, "let clients ask for the nearest subjects below the threshold")
@@ -122,8 +126,10 @@ func parse(args []string, env cli.Env) (*options, error) {
 		problem = "--threads and --max-inflight cannot be negative"
 	case o.server.QueueTimeout < 0, o.server.DrainDelay < 0:
 		problem = "--queue-timeout and --drain-delay cannot be negative"
-	case search < 0 || search > 1 || verify < 0 || verify > 1:
-		problem = "a threshold is a similarity: above 0 and at most 1"
+	case search < 0 || search > 1 || verify < 0 || verify > 1 || live < 0 || live > 1:
+		problem = "a threshold is above 0 and at most 1"
+	case noLive && live > 0:
+		problem = "--no-liveness and --liveness-threshold contradict each other"
 	case (o.tlsCert == "") != (o.tlsKey == ""):
 		problem = "--tls-cert and --tls-key go together"
 	case o.logFormat != "text" && o.logFormat != "json":
@@ -135,6 +141,10 @@ func parse(args []string, env cli.Env) (*options, error) {
 		return nil, cli.Usage(fs, "%s", problem)
 	}
 	o.server.SearchThreshold, o.server.VerifyThreshold = float32(search), float32(verify)
+	o.engine.Liveness, o.server.LivenessThreshold = !noLive, float32(live)
+	if noLive {
+		o.server.LivenessThreshold = -1
+	}
 	o.server.MaxBody = int64(maxBody)
 
 	var lists [3][]string
@@ -247,6 +257,9 @@ func run(ctx context.Context, args []string, env cli.Env, listening func(net.Add
 		"preset", info.Preset, "detector", info.Detector, "embedder", info.Embedder, "threads", info.Threads,
 		"subjects", held.Subjects, "templates", held.Templates, "loaded_ms", held.LoadTime.Milliseconds(),
 		"encrypted", held.Store.Encrypted, "keys", cfg.Keys.Len())
+	if cfg.LivenessThreshold < 0 {
+		log.Warn("liveness is not checked: a photograph of an enrolled person held up to the camera passes for them")
+	}
 	if cfg.NoAuth {
 		log.Warn("authentication is off: whoever reaches this port can enrol and remove people")
 	}

@@ -102,7 +102,7 @@ func TestParseServeRefuses(t *testing.T) {
 		"unknown flag":     {[]string{"--store", "f.db", "--fast"}, "flag provided but not defined"},
 		"negative threads": {[]string{"--store", "f.db", "--threads", "-2"}, "cannot be negative"},
 		"negative wait":    {[]string{"--store", "f.db", "--queue-timeout", "-1s"}, "cannot be negative"},
-		"threshold":        {[]string{"--store", "f.db", "--search-threshold", "60"}, "a threshold is a similarity"},
+		"threshold":        {[]string{"--store", "f.db", "--search-threshold", "60"}, "a threshold is above 0 and at most 1"},
 		"body size":        {[]string{"--store", "f.db", "--max-body", "huge"}, "is not a size"},
 		"half a TLS pair":  {[]string{"--store", "f.db", "--tls-cert", "c.pem"}, "go together"},
 		"log format":       {[]string{"--store", "f.db", "--log-format", "xml"}, "text or json"},

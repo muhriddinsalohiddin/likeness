@@ -55,6 +55,11 @@ type Config struct {
 	// it tells a caller who merely resembles whom.
 	AllowCandidates bool
 
+	// LivenessThreshold is the liveness below which a face is taken for a
+	// picture of one and turned down. Zero means 0.55 if the engine judges
+	// liveness and no check if it does not; negative means no check.
+	LivenessThreshold float32
+
 	// MaxInflight is how many pictures are analysed at the same time
 	// (default 2). Queue is how many more requests may wait for their turn
 	// (default 8 for each of those; negative for none) and QueueTimeout
@@ -86,6 +91,8 @@ const (
 	defaultQueueTimeout = 50 * time.Millisecond
 	defaultMaxBody      = 10 << 20
 	defaultMaxTemplates = 10
+	// The operating point of the anti-spoofing models' own authors.
+	defaultLiveness = 0.55
 
 	// How long requests under way get to finish once the server stops.
 	defaultGrace = 15 * time.Second
@@ -131,6 +138,16 @@ func New(cfg Config) (*Server, error) {
 		if !(t.value > 0 && t.value <= 1) {
 			return nil, fmt.Errorf("server: the %s threshold is %v; it has to be above 0 and at most 1", t.name, t.value)
 		}
+	}
+	switch judged := len(info.Liveness) > 0; {
+	case cfg.LivenessThreshold < 0:
+		cfg.LivenessThreshold = 0
+	case cfg.LivenessThreshold > 1:
+		return nil, fmt.Errorf("server: the liveness threshold is %v; it has to be at most 1", cfg.LivenessThreshold)
+	case cfg.LivenessThreshold > 0 && !judged:
+		return nil, errors.New("server: a liveness threshold is set, and the engine was opened without liveness models")
+	case cfg.LivenessThreshold == 0 && judged:
+		cfg.LivenessThreshold = defaultLiveness
 	}
 	if cfg.MaxInflight <= 0 {
 		cfg.MaxInflight = defaultInflight

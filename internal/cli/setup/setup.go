@@ -208,16 +208,24 @@ func noRuntime() error {
 
 // modelItems lists the model files of the presets under dir, each once.
 func modelItems(presets []models.Preset, dir string) []item {
-	roles := [...]string{"detector", "embedder"}
 	var items []item
 	for _, p := range presets {
-		for i, m := range []*models.Manifest{p.Detector, p.Embedder} {
+		type part struct {
+			role  string
+			model *models.Manifest
+		}
+		parts := []part{{"detector", p.Detector}, {"embedder", p.Embedder}}
+		for _, m := range p.Liveness {
+			parts = append(parts, part{"liveness", m})
+		}
+		for _, pt := range parts {
+			m := pt.model
 			dst := filepath.Join(dir, "models", m.File)
 			if slices.ContainsFunc(items, func(it item) bool { return it.dst == dst }) {
 				continue
 			}
 			items = append(items, item{
-				what:     roles[i] + " model " + m.Name,
+				what:     pt.role + " model " + m.Name,
 				artifact: m.Artifact,
 				dst:      dst,
 				licence:  m.License + ", from " + m.Source,

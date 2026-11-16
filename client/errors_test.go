@@ -290,7 +290,7 @@ func TestValuesOfANewerServer(t *testing.T) {
 	s := play(t,
 		ok(`{"faces":[{"box":{"left":1,"top":2,"right":3,"bottom":4},"quality":{"score":0.9,"liveness":0.2},"reject":"wearing_a_mask","match":false,"matches":[],"mood":"calm"}],
 		     "faces_found":1,"threshold":0.7,"width":4,"height":3,"model_age_days":12,
-		     "timing_ms":{"read":0.5,"liveness":1.25,"search":0.004,"total":3}}`),
+		     "timing_ms":{"read":0.5,"rerank":1.25,"search":0.004,"total":3}}`),
 		reply(http.StatusUnprocessableEntity, `{"error":{"code":"liveness_failed","message":"the face is a photograph","reject":"printed","hint":"blink"},"request_id":"new-1"}`),
 		reply(http.StatusPaymentRequired, `{"error":{"code":"quota_exceeded","message":"enough for today"},"request_id":"new-2"}`),
 	)
@@ -303,7 +303,7 @@ func TestValuesOfANewerServer(t *testing.T) {
 	if got := res.Faces[0].Reject; got != Reason("wearing_a_mask") {
 		t.Errorf("an unknown reason arrived as %q", got)
 	}
-	if res.Timing.Other["liveness"] != 1250*time.Microsecond || len(res.Timing.Other) != 1 || res.Timing.Search != 4*time.Microsecond {
+	if res.Timing.Other["rerank"] != 1250*time.Microsecond || len(res.Timing.Other) != 1 || res.Timing.Search != 4*time.Microsecond {
 		t.Errorf("an unknown stage: %+v", res.Timing)
 	}
 

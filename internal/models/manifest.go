@@ -25,6 +25,10 @@ const (
 	ArcFace Kind = "arcface"
 	// SFace is the OpenCV Zoo embedder: 112x112 BGR crop, raw 0..255 values.
 	SFace Kind = "sface"
+	// FASNet is a Silent-Face anti-spoofing model: an 80x80 BGR crop of the
+	// face with some of its surroundings, raw 0..255 values, three classes
+	// out.
+	FASNet Kind = "fasnet"
 )
 
 // Detector reports whether models of this kind find faces (as opposed to
@@ -55,8 +59,11 @@ type Manifest struct {
 	Input   int
 	Dynamic bool
 	Norm    vision.Norm
-	// Embedding is the vector length of an embedder, 0 for detectors.
+	// Embedding is the vector length of an embedder, 0 for other models.
 	Embedding int
+	// Scale is how many times wider and taller than the face box the crop
+	// of an anti-spoofing model is; 0 for other models.
+	Scale float64
 	// Thresholds are the similarities at which an embedder's vectors count
 	// as the same person, until someone calibrates better ones.
 	Thresholds Thresholds
@@ -88,6 +95,9 @@ type Preset struct {
 	Description string
 	Detector    *Manifest
 	Embedder    *Manifest
+	// Liveness are the models that tell a face from a picture of one. They
+	// are loaded only when asked for.
+	Liveness []*Manifest
 }
 
 // NonCommercial reports whether either model carries a research-only licence.
@@ -182,30 +192,64 @@ var (
 // All lists every known model.
 var All = []*Manifest{yunet, sface, det500m, det10g, w600kMBF, w600kR50}
 
+// The Silent-Face anti-spoofing models of Minivision, converted to ONNX
+// from the weights in their repository with the script kept next to the
+// tests of internal/liveness. One looks at the face with 2.7 times its box,
+// the other with 4 times.
+var (
+	fasnetV2 = &Manifest{
+		Name: "minifasnet_v2", Kind: FASNet,
+		File: "minifasnet_v2.onnx",
+		Artifact: Artifact{
+			URL:    "https://github.com/muhriddinsalohiddin/likeness/releases/download/models-1/minifasnet_v2.onnx",
+			SHA256: "0e7d4f135113c36b527759118cb1de4594dfed40e7fb10cf8807ea5b345a6dbe",
+			Size:   1743494,
+		},
+		Input: 80, Scale: 2.7, Norm: vision.Uniform(0, 1, true),
+		License: "Apache-2.0", Source: "Minivision Silent-Face-Anti-Spoofing (2.7_80x80_MiniFASNetV2)",
+	}
+	fasnetV1SE = &Manifest{
+		Name: "minifasnet_v1se", Kind: FASNet,
+		File: "minifasnet_v1se.onnx",
+		Artifact: Artifact{
+			URL:    "https://github.com/muhriddinsalohiddin/likeness/releases/download/models-1/minifasnet_v1se.onnx",
+			SHA256: "e000ddf96fe7789ac6e61b9734e1141d32a0abd8d676e0a27f3edaeb11f08931",
+			Size:   1742662,
+		},
+		Input: 80, Scale: 4, Norm: vision.Uniform(0, 1, true),
+		License: "Apache-2.0", Source: "Minivision Silent-Face-Anti-Spoofing (4_0_0_80x80_MiniFASNetV1SE)",
+	}
+)
+
+// Liveness lists the anti-spoofing models. Every preset uses them all.
+var Liveness = []*Manifest{fasnetV2, fasnetV1SE}
+
 // Presets lists the model pairs the tool knows how to set up.
 var Presets = []Preset{
 	{
 		Name:        "default",
 		Description: "YuNet detector and SFace embedder from the OpenCV Zoo (MIT and Apache-2.0 weights)",
-		Detector:    yunet, Embedder: sface,
+		Detector:    yunet, Embedder: sface, Liveness: Liveness,
 	},
 	{
 		Name:        "buffalo_s",
 		Description: "InsightFace SCRFD-500M detector and MobileFaceNet embedder (research-only weights)",
-		Detector:    det500m, Embedder: w600kMBF,
+		Detector:    det500m, Embedder: w600kMBF, Liveness: Liveness,
 	},
 	{
 		Name:        "buffalo_l",
 		Description: "InsightFace SCRFD-10G detector and ResNet50 embedder (research-only weights; needs a GPU to stay under 100 ms)",
-		Detector:    det10g, Embedder: w600kR50,
+		Detector:    det10g, Embedder: w600kR50, Liveness: Liveness,
 	},
 }
 
 // Lookup finds a model by name.
 func Lookup(name string) (*Manifest, bool) {
-	for _, m := range All {
-		if m.Name == name {
-			return m, true
+	for _, list := range [][]*Manifest{All, Liveness} {
+		for _, m := range list {
+			if m.Name == name {
+				return m, true
+			}
 		}
 	}
 	return nil, false

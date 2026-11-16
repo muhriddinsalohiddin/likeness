@@ -53,6 +53,10 @@ type Options struct {
 	Policy Policy
 	// MaxFaces bounds the faces analysed when Faces is All; 0 means 32.
 	MaxFaces int
+	// MinLiveness turns down, with Spoof, a face whose Liveness is lower.
+	// Zero does not; any other value needs an engine opened with
+	// Config.Liveness.
+	MinLiveness float32
 }
 
 // ForSearch returns the options for recognising whoever is at the camera.
@@ -81,6 +85,11 @@ type Face struct {
 	// right mouth corner, as seen in the picture.
 	Landmarks [5]Point
 	Quality   Quality
+	// Liveness is the probability that this is a face and not a picture of
+	// one, judged from this frame alone. Zero when it was not judged: the
+	// engine was opened without Config.Liveness, or the face was turned
+	// down before.
+	Liveness float32
 	// Reject says why the face was not embedded; Accepted if it was.
 	Reject Reason
 	// Embedding is the unit-length vector describing the face, nil if the
@@ -93,6 +102,7 @@ type Timing struct {
 	Decode time.Duration // reading the picture
 	Detect time.Duration // finding faces, all passes
 	Align  time.Duration // cropping faces and measuring their quality
+	Live   time.Duration // judging whether the faces are live
 	Embed  time.Duration // computing vectors
 	Total  time.Duration
 }
@@ -152,6 +162,9 @@ func (e *Engine) Analyze(ctx context.Context, picture []byte, o Options) (*Resul
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if o.MinLiveness > 0 && e.live == nil {
+		return nil, ErrNoLiveness
+	}
 
 	start := time.Now()
 	img, err := vision.Decode(picture, e.limits)
@@ -205,7 +218,7 @@ func (e *Engine) Analyze(ctx context.Context, picture []byte, o Options) (*Resul
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := e.analyzeFace(img, cands[i], policy, res.Reject == Accepted, &res.Faces[i], &res.Timing); err != nil {
+		if err := e.analyzeFace(img, cands[i], policy, o.MinLiveness, res.Reject == Accepted, &res.Faces[i], &res.Timing); err != nil {
 			return nil, err
 		}
 	}
@@ -279,7 +292,7 @@ func (e *Engine) detect(ctx context.Context, img *vision.Image) ([]detect.Face, 
 	return faces, used, nil
 }
 
-func (e *Engine) analyzeFace(img *vision.Image, c candidate, policy quality.Policy, embedIt bool, out *Face, t *Timing) error {
+func (e *Engine) analyzeFace(img *vision.Image, c candidate, policy quality.Policy, minLive float32, embedIt bool, out *Face, t *Timing) error {
 	f, m := c.face, c.measures
 	out.Box = Box{f.Box[0], f.Box[1], f.Box[2], f.Box[3]}
 	for i, p := range f.Landmarks {
@@ -306,6 +319,19 @@ func (e *Engine) analyzeFace(img *vision.Image, c candidate, policy quality.Poli
 	if r := policy.CheckPixels(m); r != quality.OK {
 		out.Reject = Reason(r)
 		return nil
+	}
+	if e.live != nil {
+		mark = time.Now()
+		real, err := e.live.Real(img, f.Box)
+		if err != nil {
+			return fmt.Errorf("likeness: %w", err)
+		}
+		t.Live += time.Since(mark)
+		out.Liveness = real
+		if minLive > 0 && real < minLive {
+			out.Reject = Spoof
+			return nil
+		}
 	}
 	if !embedIt {
 		return nil

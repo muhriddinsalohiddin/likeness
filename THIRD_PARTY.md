@@ -11,5 +11,13 @@
 - `internal/ortx/testdata/*.onnx`: three-node graphs generated for the tests
   with the `onnx` Python package; no trained weights.
 
+- `internal/liveness/testdata/`: `export.py` converts the Silent-Face
+  anti-spoofing models to ONNX and records reference outputs with the code
+  of https://github.com/minivision-ai/Silent-Face-Anti-Spoofing (Minivision,
+  Apache-2.0), which it downloads; the crops and scores it wrote are derived
+  from the NASA photographs above.
+
 Model weights are never part of this repository. `internal/models` lists
-where each model comes from and under which licence.
+where each model comes from and under which licence. The two anti-spoofing
+models are attached to the `models-1` release of this project: the weights
+are Minivision's, Apache-2.0, unchanged apart from their conversion to ONNX.

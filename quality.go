@@ -53,6 +53,9 @@ const (
 	TooBright Reason = "too_bright"
 	// Blurry: the face lacks detail, from motion, focus or upscaling.
 	Blurry Reason = "blurry"
+	// Spoof: what is in front of the camera looks like a picture of a face,
+	// on paper or on a screen, rather than a face.
+	Spoof Reason = "spoof"
 )
 
 // Policy holds the limits a face must meet to be embedded. A zero field

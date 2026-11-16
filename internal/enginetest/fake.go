@@ -7,6 +7,8 @@
 //	face:anna        one good face; the same name always gives the same vector
 //	face:anna#2      the same person in another picture (similarity about 0.9)
 //	faces:anna,boris several faces, largest first
+//	spoof:anna       a picture of anna held up to the camera: her face, with a
+//	                 liveness of 0.08
 //	reject:blurry    one face, turned down for the given reason
 //	reject:no_face   a picture with no usable face (also multiple_faces)
 //	error:corrupt    a picture that cannot be read (also unsupported, large, small)
@@ -60,6 +62,7 @@ func (f *Fake) Info() likeness.Info {
 		Preset: "fake", Detector: "fake-detector", Embedder: "fake-embedder",
 		Fingerprint: "fake:embedder:0000000000000000", Dim: Dim, Runtime: "0.0.0", Threads: 1,
 		VerifyThreshold: 0.5, SearchThreshold: 0.7,
+		Liveness: []string{"fake-liveness"},
 	}
 }
 
@@ -105,7 +108,8 @@ func face(name string, rank int) likeness.Face {
 	size := float32(200 - 30*rank) // later faces are smaller
 	left := float32(100 + 220*rank)
 	f := likeness.Face{
-		Box: likeness.Box{Left: left, Top: 80, Right: left + size, Bottom: 80 + size*1.25},
+		Box:      likeness.Box{Left: left, Top: 80, Right: left + size, Bottom: 80 + size*1.25},
+		Liveness: 0.97,
 		Quality: likeness.Quality{
 			Score: 0.95, EyeDistance: size * 0.42, Yaw: 3, Pitch: -2, Roll: 1,
 			InFrame: 1, Brightness: 140, Sharpness: 310,
@@ -164,6 +168,11 @@ func (f *Fake) Analyze(ctx context.Context, picture []byte, o likeness.Options) 
 	case "face":
 		res.Found = 1
 		res.Faces = []likeness.Face{face(arg, 0)}
+	case "spoof":
+		res.Found = 1
+		shown := face(arg, 0)
+		shown.Liveness = 0.08
+		res.Faces = []likeness.Face{shown}
 	case "faces":
 		names := strings.Split(arg, ",")
 		res.Found = len(names)
@@ -207,6 +216,11 @@ func (f *Fake) Analyze(ctx context.Context, picture []byte, o likeness.Options) 
 		panic("enginetest: the engine blew up")
 	default:
 		return nil, fmt.Errorf("likeness: %w", likeness.ErrUnsupportedImage)
+	}
+	for i := range res.Faces {
+		if f := &res.Faces[i]; f.Embedding != nil && f.Liveness < o.MinLiveness {
+			f.Reject, f.Embedding = likeness.Spoof, nil
+		}
 	}
 	return res, nil
 }

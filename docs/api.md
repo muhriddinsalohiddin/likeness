@@ -20,6 +20,7 @@ curl -H "Authorization: Bearer $LIKENESS_SEARCH_KEYS" \
 - [Search](#search) · [Verify](#verify) · [Enrol](#enrol)
 - [Subjects](#subjects) · [Info](#info)
 - [Health and metrics](#health-and-metrics)
+- [Liveness](#liveness)
 - [When the server is busy](#when-the-server-is-busy)
 - [Errors](#errors) · [Why a face is turned down](#why-a-face-is-turned-down)
 - [Running it](#running-it) · [What is kept and what is logged](#what-is-kept-and-what-is-logged)
@@ -92,8 +93,9 @@ milliseconds, in `timing_ms` and in a `Server-Timing` header:
 
 `read` is receiving the upload, `queue` waiting for a free slot (see
 [below](#when-the-server-is-busy)), `decode` to `embed` the work on the
-picture, and the last stage before `total` what the endpoint did with the
-result: `search`, `compare` or `store`.
+picture (with `liveness` between `align` and `embed` when faces are checked
+for being live), and the last stage before `total` what the endpoint did
+with the result: `search`, `compare` or `store`.
 
 ## Search
 
@@ -351,6 +353,32 @@ store only opens for the model it was made with.
 Health checks and scrapes are not counted in the request metrics, and no
 metric carries a subject id.
 
+## Liveness
+
+A face in a search, a verification or an enrolment has to be a face, not a
+picture of one. Every face that is good enough to compare is also judged for
+that, and the answer carries the judgement next to its quality:
+
+```json
+"liveness": 0.989
+```
+
+It is the probability, from 0 to 1, that a person is in front of the camera
+rather than a print or a screen showing one. Below the threshold (0.55,
+`--liveness-threshold`) the face is turned down with `"reject": "spoof"` and
+is compared with nobody: a search finds no match, a verification is not
+verified, an enrolment is refused with `422`.
+
+The judgement is made from the one frame that was sent, by two small models
+that look at the face and its surroundings, where the edge of a sheet of
+paper or of a telephone shows. It costs a few milliseconds. It stops the
+casual attempt — a colleague's photograph held up to the camera — and it is
+not proof: a good screen can pass, and so can a video fed to the browser in
+place of the camera. Treat it as one barrier among several.
+
+`--no-liveness` turns the check off; `GET /v1/info` says under `liveness`
+whether it is on, with which models and at what threshold.
+
 ## When the server is busy
 
 Analysing a picture uses every core it is given, so the server analyses only
@@ -434,6 +462,7 @@ a log. Some codes bring further fields, described where they occur.
 | `bad_pose` | the head is turned, tilted or leaning too far |
 | `too_dark`, `too_bright` | the face is under- or over-exposed |
 | `blurry` | the face lacks detail: motion, focus, or an upscaled picture |
+| `spoof` | it looks like a picture of a face, on paper or on a screen, rather than a face |
 
 and `quality` holds what was measured:
 
@@ -469,6 +498,7 @@ its size, position or pose, before they were measured.
 | `--preset` | `default` | the models to use |
 | `--search-threshold`, `--verify-threshold` | the model's | similarities from which a face counts as a subject's |
 | `--max-inflight`, `--queue`, `--queue-timeout` | 2, 16, 50ms | see [When the server is busy](#when-the-server-is-busy) |
+| `--liveness-threshold`, `--no-liveness` | 0.55 | see [Liveness](#liveness) |
 | `--tls-cert`, `--tls-key` | | serve HTTPS |
 | `--drain-delay` | 0 | keep serving this long after a stop signal while `/readyz` says 503 |
 | `--log-format`, `--log-level` | `text`, `info` | |

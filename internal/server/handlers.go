@@ -38,6 +38,7 @@ func (s *Server) receive(c *call, r *http.Request) (*upload, *params, *apiError)
 
 // analyse runs the engine on a picture once a slot is free.
 func (s *Server) analyse(ctx context.Context, c *call, picture []byte, o likeness.Options) (*likeness.Result, *apiError) {
+	o.MinLiveness = s.cfg.LivenessThreshold
 	waited, err := s.limit.acquire(ctx)
 	c.stage("queue", waited)
 	if err != nil {
@@ -55,6 +56,9 @@ func (s *Server) analyse(ctx context.Context, c *call, picture []byte, o likenes
 	c.stage("decode", t.Decode)
 	c.stage("detect", t.Detect)
 	c.stage("align", t.Align)
+	if s.cfg.LivenessThreshold > 0 {
+		c.stage("liveness", t.Live)
+	}
 	c.stage("embed", t.Embed)
 	return res, nil
 }
@@ -538,6 +542,11 @@ func storeError(err error) *apiError {
 	return internal(err)
 }
 
+type livenessJSON struct {
+	Models    []string `json:"models"`
+	Threshold float64  `json:"threshold"`
+}
+
 type infoResponse struct {
 	Version     string `json:"version"`
 	Preset      string `json:"preset"`
@@ -552,7 +561,9 @@ type infoResponse struct {
 		Search float64 `json:"search"`
 		Verify float64 `json:"verify"`
 	} `json:"thresholds"`
-	Gallery struct {
+	// Liveness is absent when faces are not checked for being live.
+	Liveness *livenessJSON `json:"liveness,omitempty"`
+	Gallery  struct {
 		Subjects  int       `json:"subjects"`
 		Templates int       `json:"templates"`
 		Encrypted bool      `json:"encrypted"`
@@ -579,6 +590,9 @@ func (s *Server) showInfo(c *call, w http.ResponseWriter, r *http.Request) *apiE
 		Version: likeness.Version, Preset: s.info.Preset, Detector: s.info.Detector, Embedder: s.info.Embedder,
 		Fingerprint: s.info.Fingerprint, Dim: s.info.Dim, Runtime: s.info.Runtime, Threads: s.info.Threads,
 		Kernel: held.Kernel,
+	}
+	if s.cfg.LivenessThreshold > 0 {
+		out.Liveness = &livenessJSON{Models: s.info.Liveness, Threshold: round(float64(s.cfg.LivenessThreshold), 3)}
 	}
 	out.Thresholds.Search = similarity(s.cfg.SearchThreshold)
 	out.Thresholds.Verify = similarity(s.cfg.VerifyThreshold)

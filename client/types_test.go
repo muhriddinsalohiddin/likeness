@@ -152,14 +152,14 @@ var (
 	}
 	reasons = []Reason{
 		ReasonNoFace, ReasonMultipleFaces, ReasonLowScore, ReasonOutOfFrame, ReasonFaceTooSmall,
-		ReasonBadPose, ReasonTooDark, ReasonTooBright, ReasonBlurry,
+		ReasonBadPose, ReasonTooDark, ReasonTooBright, ReasonBlurry, ReasonSpoof,
 	}
 )
 
 func TestReasonsAreTheEngines(t *testing.T) {
 	theirs := []likeness.Reason{
 		likeness.NoFace, likeness.MultipleFaces, likeness.LowScore, likeness.OutOfFrame, likeness.FaceTooSmall,
-		likeness.BadPose, likeness.TooDark, likeness.TooBright, likeness.Blurry,
+		likeness.BadPose, likeness.TooDark, likeness.TooBright, likeness.Blurry, likeness.Spoof,
 	}
 	if len(theirs) != len(reasons) {
 		t.Fatalf("%d reasons here, %d in the engine", len(reasons), len(theirs))

@@ -67,8 +67,9 @@ On the Xeon the light models sustain about 50 requests per second with p99 under
 - [x] a container image (`Dockerfile`)
 - [ ] a stronger permissively licensed embedder
 
-Liveness detection, GPU execution providers and an approximate index for
-millions of faces are out of scope for 0.1.
+Liveness is judged from a single frame; a challenge the person has to
+answer, GPU execution providers and an approximate index for millions of
+faces are out of scope for 0.1.
 
 ## Using the engine
 
@@ -209,6 +210,9 @@ models. The whole API is described in [docs/api.md](docs/api.md); in short:
   picture after checking that it is good enough to be one. An enrolment
   that would give one face to two people, or two unlike faces to one, is
   refused unless you insist.
+- **A photograph is not a person.** Every face is also judged for being
+  live, from the frame it came in. A picture of an enrolled person held up
+  to the camera is turned down as `spoof` and compared with nobody.
 - **It refuses rather than queues.** Only a few pictures are analysed at a
   time; a request that would wait more than a moment gets a `429` at once.
   Under more load than it can carry, the server answers fewer requests, not

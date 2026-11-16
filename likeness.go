@@ -13,6 +13,7 @@ import (
 	"github.com/muhriddinsalohiddin/likeness/internal/detect"
 	"github.com/muhriddinsalohiddin/likeness/internal/embed"
 	"github.com/muhriddinsalohiddin/likeness/internal/home"
+	"github.com/muhriddinsalohiddin/likeness/internal/liveness"
 	"github.com/muhriddinsalohiddin/likeness/internal/models"
 	"github.com/muhriddinsalohiddin/likeness/internal/ortx"
 	"github.com/muhriddinsalohiddin/likeness/internal/vision"
@@ -37,6 +38,10 @@ type Config struct {
 	// all of them. A process can hold several engines only if they agree on
 	// Library and Threads.
 	Threads int
+	// Liveness also loads the models that tell a face from a picture of
+	// one, so that Analyze fills in Face.Liveness. Open fails if they are
+	// not installed.
+	Liveness bool
 	// MaxPixels and MaxSide bound the pictures Analyze accepts; pictures
 	// beyond them are refused before they are decoded. Zero means 25
 	// megapixels and 8192 pixels.
@@ -62,10 +67,17 @@ type Info struct {
 	// is stricter, when a subject is picked out of a gallery. They are
 	// starting points; measure on your own pictures before relying on them.
 	VerifyThreshold, SearchThreshold float32
+	// Liveness names the models that judge whether a face is live; empty
+	// when the engine was opened without them.
+	Liveness []string
 }
 
 // ErrClosed is returned by an Engine that has been closed.
 var ErrClosed = errors.New("likeness: engine is closed")
+
+// ErrNoLiveness is returned when Options.MinLiveness asks for a judgement
+// the engine was not opened to make.
+var ErrNoLiveness = errors.New("likeness: the engine was opened without liveness models")
 
 // Engine finds faces in pictures and turns them into vectors. It is safe for
 // concurrent use; every call runs to completion on the caller's goroutine.
@@ -76,6 +88,7 @@ type Engine struct {
 	info   Info
 	det    *detect.Detector
 	emb    *embed.Embedder
+	live   *liveness.Checker // nil without Config.Liveness
 	limits vision.Limits
 	sizes  []int // detector input sizes to try, smallest first
 	crops  sync.Pool
@@ -147,7 +160,11 @@ func Open(cfg Config) (*Engine, error) {
 		return nil, fmt.Errorf("likeness: ONNX Runtime library: %w", err)
 	}
 	modelsDir := filepath.Join(dir, "models")
-	for _, m := range []*models.Manifest{preset.Detector, preset.Embedder} {
+	needed := []*models.Manifest{preset.Detector, preset.Embedder}
+	if cfg.Liveness {
+		needed = append(needed, preset.Liveness...)
+	}
+	for _, m := range needed {
 		if _, err := models.Installed(modelsDir, m); err != nil {
 			return nil, fmt.Errorf("likeness: model %s: %w", m.Name, err)
 		}
@@ -167,6 +184,9 @@ func Open(cfg Config) (*Engine, error) {
 		if e.emb != nil {
 			e.emb.Close()
 		}
+		if e.live != nil {
+			e.live.Close()
+		}
 		releaseRuntime()
 		return nil, fmt.Errorf("likeness: %w", err)
 	}
@@ -176,12 +196,20 @@ func Open(cfg Config) (*Engine, error) {
 	if e.emb, err = embed.New(rt, preset.Embedder, modelsDir); err != nil {
 		return fail(err)
 	}
+	if cfg.Liveness {
+		if e.live, err = liveness.New(rt, preset.Liveness, modelsDir); err != nil {
+			return fail(err)
+		}
+	}
 	e.info = Info{
 		Preset: preset.Name, Detector: preset.Detector.Name, Embedder: preset.Embedder.Name,
 		Fingerprint: e.emb.Fingerprint(), Dim: e.emb.Dim(),
 		Runtime: rt.Version(), Threads: rt.Config().Threads,
 		VerifyThreshold: preset.Embedder.Thresholds.Verify,
 		SearchThreshold: preset.Embedder.Thresholds.Search,
+	}
+	if e.live != nil {
+		e.info.Liveness = e.live.Names()
 	}
 	e.sizes = detectSizes(e.det)
 	cropLen := 3 * e.emb.CropSize() * e.emb.CropSize()
@@ -221,7 +249,15 @@ func (e *Engine) warmUp() error {
 	crop := e.crops.Get().(*[]float32)
 	defer e.crops.Put(crop)
 	clear(*crop)
-	return e.emb.EmbedCrop(*crop, make([]float32, e.emb.Dim()))
+	if err := e.emb.EmbedCrop(*crop, make([]float32, e.emb.Dim())); err != nil {
+		return err
+	}
+	if e.live != nil {
+		if _, err := e.live.Real(blank, [4]float32{16, 16, 48, 48}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Info reports which models the engine runs.

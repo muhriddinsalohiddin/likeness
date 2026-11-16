@@ -225,11 +225,11 @@ func TestTimings(t *testing.T) {
 			t.Errorf("no time for %s: %v", stage, got.Timing)
 		}
 	}
-	order := regexp.MustCompile(`"timing_ms":\{"read":[\d.]+,"queue":[\d.]+,"decode":2,"detect":3,"align":1,"embed":4,"search":[\d.]+,"total":[\d.]+\}`)
+	order := regexp.MustCompile(`"timing_ms":\{"read":[\d.]+,"queue":[\d.]+,"decode":2,"detect":3,"align":1,"liveness":0,"embed":4,"search":[\d.]+,"total":[\d.]+\}`)
 	if !order.Match(a.body) {
 		t.Errorf("stages are listed in the order they happen: %s", a.body)
 	}
-	header := regexp.MustCompile(`^read;dur=[\d.]+, queue;dur=[\d.]+, decode;dur=2, detect;dur=3, align;dur=1, embed;dur=4, search;dur=[\d.]+, total;dur=[\d.]+$`)
+	header := regexp.MustCompile(`^read;dur=[\d.]+, queue;dur=[\d.]+, decode;dur=2, detect;dur=3, align;dur=1, liveness;dur=0, embed;dur=4, search;dur=[\d.]+, total;dur=[\d.]+$`)
 	if got := a.header.Get("Server-Timing"); !header.MatchString(got) {
 		t.Errorf("Server-Timing %q", got)
 	}

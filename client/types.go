@@ -32,6 +32,9 @@ const (
 	ReasonTooBright Reason = "too_bright"
 	// ReasonBlurry: the face lacks detail, from motion, focus or upscaling.
 	ReasonBlurry Reason = "blurry"
+	// ReasonSpoof: what was in front of the camera looks like a picture of
+	// a face rather than a face.
+	ReasonSpoof Reason = "spoof"
 )
 
 // Box is where a face is: the edges of a rectangle around it, in pixels of
@@ -69,6 +72,9 @@ type Face struct {
 	// Box is where the face is and Quality what was measured on it.
 	Box     Box     `json:"box"`
 	Quality Quality `json:"quality"`
+	// Liveness is the probability that this is a face and not a picture of
+	// one; zero when the server does not judge it.
+	Liveness float64 `json:"liveness,omitempty"`
 	// Reject is set when the face was too poor to compare with anything.
 	Reject Reason `json:"reject,omitempty"`
 }
@@ -79,6 +85,8 @@ type Timing struct {
 	Read, Queue time.Duration
 	// Decode, Detect, Align and Embed are the work on the picture.
 	Decode, Detect, Align, Embed time.Duration
+	// Liveness is judging whether the face is live, on a server that does.
+	Liveness time.Duration
 	// Search, Compare and Store are what the endpoint did with the face: a
 	// search has the first, a verification the second, an enrolment the
 	// third.
@@ -102,7 +110,7 @@ func (t *Timing) stages() []stage {
 	return []stage{
 		{"read", &t.Read, false}, {"queue", &t.Queue, false},
 		{"decode", &t.Decode, false}, {"detect", &t.Detect, false},
-		{"align", &t.Align, false}, {"embed", &t.Embed, false},
+		{"align", &t.Align, false}, {"liveness", &t.Liveness, true}, {"embed", &t.Embed, false},
 		{"search", &t.Search, true}, {"compare", &t.Compare, true}, {"store", &t.Store, true},
 		{"total", &t.Total, false},
 	}
