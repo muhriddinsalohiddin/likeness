@@ -1,4 +1,4 @@
-package main
+package serve
 
 import (
 	"bytes"
@@ -9,8 +9,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"flag"
@@ -27,6 +25,7 @@ import (
 	"time"
 
 	"github.com/muhriddinsalohiddin/likeness"
+	"github.com/muhriddinsalohiddin/likeness/internal/cli"
 	"github.com/muhriddinsalohiddin/likeness/internal/enginetest"
 	"github.com/muhriddinsalohiddin/likeness/store"
 )
@@ -36,8 +35,18 @@ const (
 	testSearchKey = "a-search-key-for-tests"
 )
 
-// environment makes a getenv out of pairs of names and values.
-func environment(pairs ...string) func(string) string {
+// parseServe is parse with the environment and the output spelt out.
+func parseServe(args []string, getenv func(string) string, out io.Writer) (*options, error) {
+	return parse(args, cli.Env{Getenv: getenv, Stdout: io.Discard, Stderr: out})
+}
+
+// serve is run with the environment and the output spelt out.
+func serve(ctx context.Context, args []string, getenv func(string) string, stderr io.Writer, listening func(net.Addr)) error {
+	return run(ctx, args, cli.Env{Getenv: getenv, Stdout: io.Discard, Stderr: stderr}, listening)
+}
+
+// vars makes a getenv out of pairs of names and values.
+func vars(pairs ...string) func(string) string {
 	vars := make(map[string]string)
 	for i := 0; i < len(pairs); i += 2 {
 		vars[pairs[i]] = pairs[i+1]
@@ -46,13 +55,13 @@ func environment(pairs ...string) func(string) string {
 }
 
 func TestParseServe(t *testing.T) {
-	env := environment("LIKENESS_ADMIN_KEYS", testAdminKey)
+	env := vars("LIKENESS_ADMIN_KEYS", testAdminKey)
 
 	o, err := parseServe([]string{"--store", "faces.db"}, env, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.store != "faces.db" || o.listen != "127.0.0.1:8080" || o.preset != "default" || o.threads != 0 ||
+	if o.store != "faces.db" || o.listen != "127.0.0.1:8080" || o.engine.Preset != "default" || o.engine.Threads != 0 ||
 		o.logFormat != "text" || o.logLevel != slog.LevelInfo || o.storeKey != nil {
 		t.Errorf("defaults: %+v", o)
 	}
@@ -71,7 +80,7 @@ func TestParseServe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.listen != ":9000" || o.preset != "buffalo_s" || o.home != "/opt/likeness" || o.threads != 4 ||
+	if o.listen != ":9000" || o.engine.Preset != "buffalo_s" || o.engine.Home != "/opt/likeness" || o.engine.Threads != 4 ||
 		o.tlsCert != "cert.pem" || o.tlsKey != "key.pem" || o.logFormat != "json" || o.logLevel != slog.LevelDebug {
 		t.Errorf("flags: %+v", o)
 	}
@@ -83,7 +92,7 @@ func TestParseServe(t *testing.T) {
 }
 
 func TestParseServeRefuses(t *testing.T) {
-	env := environment("LIKENESS_ADMIN_KEYS", testAdminKey)
+	env := vars("LIKENESS_ADMIN_KEYS", testAdminKey)
 	for name, c := range map[string]struct {
 		args []string
 		says string
@@ -100,7 +109,7 @@ func TestParseServeRefuses(t *testing.T) {
 		"log level":        {[]string{"--store", "f.db", "--log-level", "loud"}, "debug, info, warn or error"},
 	} {
 		var out bytes.Buffer
-		if _, err := parseServe(c.args, env, &out); !errors.Is(err, errUsage) {
+		if _, err := parseServe(c.args, env, &out); !errors.Is(err, cli.ErrUsage) {
 			t.Errorf("%s: %v", name, err)
 		}
 		if !strings.Contains(out.String(), c.says) {
@@ -123,16 +132,16 @@ func TestServeKeys(t *testing.T) {
 	args := []string{"--store", "f.db"}
 
 	// keys are required, unless doing without is asked for by name
-	if _, err := parseServe(args, environment(), io.Discard); err == nil || !strings.Contains(err.Error(), "LIKENESS_ADMIN_KEYS") {
+	if _, err := parseServe(args, vars(), io.Discard); err == nil || !strings.Contains(err.Error(), "LIKENESS_ADMIN_KEYS") {
 		t.Errorf("no keys: %v", err)
 	}
-	o, err := parseServe(append(args, "--insecure-no-auth"), environment(), io.Discard)
+	o, err := parseServe(append(args, "--insecure-no-auth"), vars(), io.Discard)
 	if err != nil || !o.server.NoAuth || o.server.Keys.Len() != 0 {
 		t.Errorf("--insecure-no-auth: %+v %v", o, err)
 	}
 
 	// several of each kind
-	o, err = parseServe(args, environment(
+	o, err = parseServe(args, vars(
 		"LIKENESS_ADMIN_KEYS", testAdminKey,
 		"LIKENESS_SEARCH_KEYS", testSearchKey+", another-search-key-0001 ,",
 		"LIKENESS_METRICS_KEYS", "a-key-for-prometheus",
@@ -142,7 +151,7 @@ func TestServeKeys(t *testing.T) {
 	}
 
 	// a weak key is refused without being repeated
-	_, err = parseServe(args, environment("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_SEARCH_KEYS", "hunter2"), io.Discard)
+	_, err = parseServe(args, vars("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_SEARCH_KEYS", "hunter2"), io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "search-1") || strings.Contains(err.Error(), "hunter2") {
 		t.Errorf("a short key: %v", err)
 	}
@@ -157,57 +166,16 @@ func TestServeKeys(t *testing.T) {
 	if err := os.WriteFile(storeKey, []byte(strings.Repeat("ab", 32)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	o, err = parseServe(args, environment("LIKENESS_ADMIN_KEYS_FILE", admin, "LIKENESS_STORE_KEY_FILE", storeKey), io.Discard)
+	o, err = parseServe(args, vars("LIKENESS_ADMIN_KEYS_FILE", admin, "LIKENESS_STORE_KEY_FILE", storeKey), io.Discard)
 	if err != nil || o.server.Keys.Len() != 2 || len(o.storeKey) != store.KeySize {
 		t.Fatalf("secrets from files: %+v %v", o, err)
 	}
-	if _, err := parseServe(args, environment("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_ADMIN_KEYS_FILE", admin), io.Discard); err == nil ||
+	if _, err := parseServe(args, vars("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_ADMIN_KEYS_FILE", admin), io.Discard); err == nil ||
 		!strings.Contains(err.Error(), "both set") {
 		t.Errorf("a key given twice: %v", err)
 	}
-	if _, err := parseServe(args, environment("LIKENESS_ADMIN_KEYS_FILE", filepath.Join(dir, "missing")), io.Discard); !errors.Is(err, os.ErrNotExist) {
+	if _, err := parseServe(args, vars("LIKENESS_ADMIN_KEYS_FILE", filepath.Join(dir, "missing")), io.Discard); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a missing secret file: %v", err)
-	}
-}
-
-func TestParseStoreKey(t *testing.T) {
-	raw := make([]byte, store.KeySize)
-	for i := range raw {
-		raw[i] = byte(i * 7)
-	}
-	for name, text := range map[string]string{
-		"hex":             hex.EncodeToString(raw),
-		"upper-case hex":  strings.ToUpper(hex.EncodeToString(raw)),
-		"base64":          base64.StdEncoding.EncodeToString(raw),
-		"unpadded base64": base64.RawStdEncoding.EncodeToString(raw),
-		"URL base64":      base64.URLEncoding.EncodeToString(raw),
-		"with a newline":  hex.EncodeToString(raw) + "\n",
-	} {
-		if key, err := parseStoreKey(text); err != nil || !bytes.Equal(key, raw) {
-			t.Errorf("%s: %x %v", name, key, err)
-		}
-	}
-	if key, err := parseStoreKey(""); key != nil || err != nil {
-		t.Errorf("no key: %x %v", key, err)
-	}
-	for name, text := range map[string]string{
-		"too short":   hex.EncodeToString(raw[:16]),
-		"too long":    hex.EncodeToString(raw) + "00",
-		"a password":  "correct horse battery staple",
-		"31 bytes":    base64.StdEncoding.EncodeToString(raw[:31]),
-		"almost hex":  "zz" + hex.EncodeToString(raw)[2:],
-		"just spaces": "   ",
-	} {
-		key, err := parseStoreKey(text)
-		if name == "just spaces" {
-			if key != nil || err != nil {
-				t.Errorf("%s: %x %v", name, key, err)
-			}
-			continue
-		}
-		if err == nil || strings.Contains(err.Error(), strings.TrimSpace(text)) {
-			t.Errorf("%s: %x %v", name, key, err)
-		}
 	}
 }
 
@@ -266,15 +234,15 @@ func (f *fakes) allClosed() bool {
 func useFake(t *testing.T) *fakes {
 	t.Helper()
 	f := &fakes{}
-	real := openEngine
-	openEngine = func(likeness.Config) (engine, error) {
+	real := cli.OpenEngine
+	cli.OpenEngine = func(likeness.Config) (cli.Engine, error) {
 		e := &enginetest.Fake{}
 		f.mu.Lock()
 		f.opened = append(f.opened, e)
 		f.mu.Unlock()
 		return e, nil
 	}
-	t.Cleanup(func() { openEngine = real })
+	t.Cleanup(func() { cli.OpenEngine = real })
 	return f
 }
 
@@ -372,7 +340,7 @@ func (r *running) call(method, path, key, body string) (int, string) {
 func TestServe(t *testing.T) {
 	useFake(t)
 	path := filepath.Join(t.TempDir(), "faces.db")
-	env := environment("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_SEARCH_KEYS", testSearchKey)
+	env := vars("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_SEARCH_KEYS", testSearchKey)
 
 	r := start(t, env, "--store", path, "--log-format", "json")
 	if status, body := r.call("POST", "/v1/subjects/anna/faces", testAdminKey, "face:anna"); status != http.StatusCreated {
@@ -422,7 +390,7 @@ func TestServeEncryptedStore(t *testing.T) {
 	useFake(t)
 	path := filepath.Join(t.TempDir(), "faces.db")
 	key := strings.Repeat("0123456789abcdef", 4)
-	env := environment("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_STORE_KEY", key)
+	env := vars("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_STORE_KEY", key)
 
 	r := start(t, env, "--store", path)
 	if status, body := r.call("POST", "/v1/subjects/anna/faces", testAdminKey, "face:anna"); status != http.StatusCreated {
@@ -437,8 +405,8 @@ func TestServeEncryptedStore(t *testing.T) {
 
 	// without the key, or with another, the store stays shut
 	for name, env := range map[string]func(string) string{
-		"no key":      environment("LIKENESS_ADMIN_KEYS", testAdminKey),
-		"another key": environment("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_STORE_KEY", strings.Repeat("f", 64)),
+		"no key":      vars("LIKENESS_ADMIN_KEYS", testAdminKey),
+		"another key": vars("LIKENESS_ADMIN_KEYS", testAdminKey, "LIKENESS_STORE_KEY", strings.Repeat("f", 64)),
 	} {
 		err := serve(context.Background(), []string{"--store", path, "--listen", "127.0.0.1:0"}, env, io.Discard, nil)
 		if !errors.Is(err, store.ErrKey) || !strings.Contains(err.Error(), "LIKENESS_STORE_KEY") || strings.Contains(err.Error(), key) {
@@ -460,7 +428,7 @@ func TestServeRefusesAnotherModelsStore(t *testing.T) {
 	st.Close()
 
 	useFake(t)
-	err = serve(context.Background(), []string{"--store", path, "--listen", "127.0.0.1:0", "--insecure-no-auth"}, environment(), io.Discard, nil)
+	err = serve(context.Background(), []string{"--store", path, "--listen", "127.0.0.1:0", "--insecure-no-auth"}, vars(), io.Discard, nil)
 	if !errors.Is(err, store.ErrMismatch) || !strings.Contains(err.Error(), "preset it was made with") {
 		t.Errorf("a store made by another model: %v", err)
 	}
@@ -471,12 +439,12 @@ func TestServeFailsBeforeListening(t *testing.T) {
 	args := []string{"--store", path, "--insecure-no-auth"}
 
 	// no models
-	real := openEngine
-	openEngine = func(likeness.Config) (engine, error) { return nil, errors.New("no models here") }
-	if err := serve(context.Background(), args, environment(), io.Discard, nil); err == nil || !strings.Contains(err.Error(), "no models here") {
+	real := cli.OpenEngine
+	cli.OpenEngine = func(likeness.Config) (cli.Engine, error) { return nil, errors.New("no models here") }
+	if err := serve(context.Background(), args, vars(), io.Discard, nil); err == nil || !strings.Contains(err.Error(), "no models here") {
 		t.Errorf("an engine that will not open: %v", err)
 	}
-	openEngine = real
+	cli.OpenEngine = real
 
 	// the port is taken
 	engines := useFake(t)
@@ -485,12 +453,12 @@ func TestServeFailsBeforeListening(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer taken.Close()
-	if err := serve(context.Background(), append(args, "--listen", taken.Addr().String()), environment(), io.Discard, nil); err == nil {
+	if err := serve(context.Background(), append(args, "--listen", taken.Addr().String()), vars(), io.Discard, nil); err == nil {
 		t.Error("serve listened on a port that was taken")
 	}
 	// the certificate is not there
 	if err := serve(context.Background(), append(args, "--listen", "127.0.0.1:0", "--tls-cert", "nowhere.pem", "--tls-key", "nowhere.key"),
-		environment(), io.Discard, nil); !errors.Is(err, os.ErrNotExist) {
+		vars(), io.Discard, nil); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a certificate that is not there: %v", err)
 	}
 	// every failure let go of the store and closed the engine
@@ -506,7 +474,7 @@ func TestServeFailsBeforeListening(t *testing.T) {
 
 func TestServeWarns(t *testing.T) {
 	useFake(t)
-	r := start(t, environment(), "--store", filepath.Join(t.TempDir(), "faces.db"), "--insecure-no-auth")
+	r := start(t, vars(), "--store", filepath.Join(t.TempDir(), "faces.db"), "--insecure-no-auth")
 	if status, body := r.call("POST", "/v1/subjects/anna/faces", "", "face:anna"); status != http.StatusCreated {
 		t.Fatalf("enrol without a key: %d %s", status, body)
 	}
@@ -520,7 +488,7 @@ func TestServeTLS(t *testing.T) {
 	dir := t.TempDir()
 	cert, key, pool := selfSigned(t, dir)
 
-	r := start(t, environment("LIKENESS_ADMIN_KEYS", testAdminKey),
+	r := start(t, vars("LIKENESS_ADMIN_KEYS", testAdminKey),
 		"--store", filepath.Join(dir, "faces.db"), "--tls-cert", cert, "--tls-key", key)
 	r.base = strings.Replace(r.base, "http://", "https://", 1)
 	r.client = &http.Client{Transport: &http.Transport{

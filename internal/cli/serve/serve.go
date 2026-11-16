@@ -1,35 +1,34 @@
-package main
+// Package serve is the `likeness serve` command: it reads the flags and the
+// environment, opens the engine and the store, and runs the HTTP server.
+package serve
 
 import (
 	"context"
 	"crypto/tls"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 
 	"github.com/muhriddinsalohiddin/likeness"
+	"github.com/muhriddinsalohiddin/likeness/internal/cli"
 	"github.com/muhriddinsalohiddin/likeness/internal/gallery"
 	"github.com/muhriddinsalohiddin/likeness/internal/models"
 	"github.com/muhriddinsalohiddin/likeness/internal/server"
 	"github.com/muhriddinsalohiddin/likeness/store"
 )
 
-const serveUsage = `usage: likeness serve --store FILE [flags]
+const usage = `usage: likeness serve --store FILE [flags]
 
 Serves the HTTP API described in docs/api.md over the faces kept in FILE.
 
 flags:
 `
 
-const serveEnvironment = `
+const environment = `
 environment:
   LIKENESS_ADMIN_KEYS    API keys that may do everything, separated by commas
   LIKENESS_SEARCH_KEYS   API keys that may search and verify
@@ -41,30 +40,13 @@ Each of the first four can be read from a file instead, named by the same
 variable with _FILE appended: LIKENESS_ADMIN_KEYS_FILE and so on.
 `
 
-// errUsage marks a command line that was wrong and has been explained.
-var errUsage = errors.New("usage")
-
-// engine is what serve needs of the face engine; tests put a stand-in here.
-type engine interface {
-	server.Analyzer
-	Close()
-}
-
-var openEngine = func(cfg likeness.Config) (engine, error) {
-	e, err := likeness.Open(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return e, nil
-}
-
-type serveOptions struct {
-	listen, store, preset, home string
-	threads                     int
-	storeKey                    []byte
-	tlsCert, tlsKey             string
-	logFormat                   string
-	logLevel                    slog.Level
+type options struct {
+	listen, store   string
+	engine          *likeness.Config
+	storeKey        []byte
+	tlsCert, tlsKey string
+	logFormat       string
+	logLevel        slog.Level
 	// server holds what the flags and the environment say about the
 	// server itself; the engine and the gallery are added when they exist.
 	server server.Config
@@ -100,31 +82,21 @@ func parseSize(text string) (int64, error) {
 	return n * unit, nil
 }
 
-// parseServe reads the command line and the environment. What it writes to
-// out is the usage text and the complaints of the flag package.
-func parseServe(args []string, getenv func(string) string, out io.Writer) (*serveOptions, error) {
-	o := &serveOptions{}
+// parse reads the command line and the environment.
+func parse(args []string, env cli.Env) (*options, error) {
+	o := &options{}
 	var (
 		search, verify float64
 		maxBody        size
 		level          string
 	)
-	fs := flag.NewFlagSet("likeness serve", flag.ContinueOnError)
-	fs.SetOutput(out)
-	say := func(format string, args ...any) { _, _ = fmt.Fprintf(out, format, args...) }
-	fs.Usage = func() {
-		say(serveUsage)
-		fs.PrintDefaults()
-		say(serveEnvironment)
-	}
+	fs := cli.Flags("likeness serve", env, usage, environment)
 	fs.StringVar(&o.store, "store", "", "`file` that keeps the enrolled faces; made if it does not exist (required)")
 	fs.StringVar(&o.listen, "listen", "127.0.0.1:8080", "`address` to listen on")
-	fs.StringVar(&o.preset, "preset", "default", "models to use: "+strings.Join(likeness.Presets(), ", "))
-	fs.StringVar(&o.home, "home", "", "`directory` with the runtime library and the models (default $LIKENESS_HOME)")
-	fs.IntVar(&o.threads, "threads", 0, "processor threads an analysis may use (default all)")
+	o.engine = cli.EngineFlags(fs)
 	fs.IntVar(&o.server.MaxInflight, "max-inflight", 0, "pictures analysed at the same time (default 2)")
 	fs.IntVar(&o.server.Queue, "queue", 0, "requests that may wait for a free slot, -1 for none (default 8 per slot)")
-	fs.DurationVar(&o.server.QueueTimeout, "queue-timeout", 0, "longest a request waits for a free slot (default 100ms)")
+	fs.DurationVar(&o.server.QueueTimeout, "queue-timeout", 0, "longest a request may wait for a free slot (default 50ms)")
 	fs.Float64Var(&search, "search-threshold", 0, "similarity from which a search names a subject (default the model's)")
 	fs.Float64Var(&verify, "verify-threshold", 0, "similarity from which a verification passes (default the model's)")
 	fs.Var(&maxBody, "max-body", "largest request body `size`, as in 8MB (default 10MiB)")
@@ -136,11 +108,8 @@ func parseServe(args []string, getenv func(string) string, out io.Writer) (*serv
 	fs.StringVar(&o.tlsKey, "tls-key", "", "private key `file` of the certificate")
 	fs.StringVar(&o.logFormat, "log-format", "text", "log as text or json")
 	fs.StringVar(&level, "log-level", "info", "debug, info, warn or error; debug names the subjects of requests")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil, err
-		}
-		return nil, errUsage
+	if err := cli.Parse(fs, args); err != nil {
+		return nil, err
 	}
 
 	problem := ""
@@ -149,7 +118,7 @@ func parseServe(args []string, getenv func(string) string, out io.Writer) (*serv
 		problem = fmt.Sprintf("unexpected argument %q", fs.Arg(0))
 	case o.store == "":
 		problem = "--store is required: the file that keeps the enrolled faces"
-	case o.threads < 0, o.server.MaxInflight < 0:
+	case o.engine.Threads < 0, o.server.MaxInflight < 0:
 		problem = "--threads and --max-inflight cannot be negative"
 	case o.server.QueueTimeout < 0, o.server.DrainDelay < 0:
 		problem = "--queue-timeout and --drain-delay cannot be negative"
@@ -163,15 +132,14 @@ func parseServe(args []string, getenv func(string) string, out io.Writer) (*serv
 		problem = "--log-level is debug, info, warn or error"
 	}
 	if problem != "" {
-		say("likeness serve: %s\nRun 'likeness serve -h' for the flags.\n", problem)
-		return nil, errUsage
+		return nil, cli.Usage(fs, "%s", problem)
 	}
 	o.server.SearchThreshold, o.server.VerifyThreshold = float32(search), float32(verify)
 	o.server.MaxBody = int64(maxBody)
 
 	var lists [3][]string
 	for i, name := range []string{"LIKENESS_ADMIN_KEYS", "LIKENESS_SEARCH_KEYS", "LIKENESS_METRICS_KEYS"} {
-		value, err := secret(getenv, name)
+		value, err := cli.Secret(env.Getenv, name)
 		if err != nil {
 			return nil, err
 		}
@@ -187,31 +155,10 @@ func parseServe(args []string, getenv func(string) string, out io.Writer) (*serv
 	}
 	o.server.Keys = keys
 
-	value, err := secret(getenv, "LIKENESS_STORE_KEY")
-	if err != nil {
-		return nil, err
-	}
-	if o.storeKey, err = parseStoreKey(value); err != nil {
+	if o.storeKey, err = cli.StoreKey(env.Getenv); err != nil {
 		return nil, err
 	}
 	return o, nil
-}
-
-// secret reads a secret from the environment, or from the file the
-// environment names: how container platforms hand secrets over.
-func secret(getenv func(string) string, name string) (string, error) {
-	value, file := getenv(name), getenv(name+"_FILE")
-	switch {
-	case value != "" && file != "":
-		return "", fmt.Errorf("%s and %s_FILE are both set; use one", name, name)
-	case file != "":
-		b, err := os.ReadFile(file)
-		if err != nil {
-			return "", fmt.Errorf("%s_FILE: %w", name, err)
-		}
-		return strings.TrimSpace(string(b)), nil
-	}
-	return value, nil
 }
 
 // splitKeys takes keys separated by commas or line breaks.
@@ -225,27 +172,7 @@ func splitKeys(list string) []string {
 	return keys
 }
 
-// parseStoreKey decodes the key the store is encrypted with. The key is
-// never repeated in an error.
-func parseStoreKey(text string) ([]byte, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil, nil
-	}
-	if len(text) == 2*store.KeySize {
-		if key, err := hex.DecodeString(text); err == nil {
-			return key, nil
-		}
-	}
-	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.RawURLEncoding} {
-		if key, err := enc.DecodeString(text); err == nil && len(key) == store.KeySize {
-			return key, nil
-		}
-	}
-	return nil, fmt.Errorf("LIKENESS_STORE_KEY has to be %d bytes, written as %d hex digits or in base64", store.KeySize, 2*store.KeySize)
-}
-
-func (o *serveOptions) logger(w io.Writer) *slog.Logger {
+func (o *options) logger(w io.Writer) *slog.Logger {
 	opts := &slog.HandlerOptions{Level: o.logLevel}
 	if o.logFormat == "json" {
 		return slog.New(slog.NewJSONHandler(w, opts))
@@ -253,16 +180,21 @@ func (o *serveOptions) logger(w io.Writer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(w, opts))
 }
 
-// serve runs the server until ctx is done. listening, if not nil, is told
-// the address once the server accepts connections.
-func serve(ctx context.Context, args []string, getenv func(string) string, stderr io.Writer, listening func(net.Addr)) (err error) {
-	o, err := parseServe(args, getenv, stderr)
+// Run serves until ctx is done. It is a cli.Command.
+func Run(ctx context.Context, args []string, env cli.Env) error {
+	return run(ctx, args, env, nil)
+}
+
+// run is Run with a hook for tests: listening, if not nil, is told the
+// address once the server accepts connections.
+func run(ctx context.Context, args []string, env cli.Env, listening func(net.Addr)) (err error) {
+	o, err := parse(args, env)
 	if err != nil {
 		return err
 	}
-	log := o.logger(stderr)
+	log := o.logger(env.Stderr)
 
-	eng, err := openEngine(likeness.Config{Preset: o.preset, Home: o.home, Threads: o.threads})
+	eng, err := cli.OpenEngine(*o.engine)
 	if err != nil {
 		return err
 	}

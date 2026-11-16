@@ -26,4 +26,4 @@ bench:
 
 tidy:
 	$(GO) mod tidy
-	gofmt -l -w cmd index internal store *.go
+	gofmt -l -w client cmd index internal store *.go

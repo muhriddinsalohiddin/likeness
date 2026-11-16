@@ -102,7 +102,7 @@ result: `search`, `compare` or `store`.
 | Option | Default | |
 |---|---|---|
 | `limit` | 1 | how many subjects to name, best first; up to 50 |
-| `threshold` | the server's | a stricter similarity to require; it cannot be lowered |
+| `threshold` | the server's | a stricter similarity to require; it can be lowered only on a server started with `--allow-candidates` |
 | `faces` | `largest` | `largest` looks at the person at the camera, `all` at up to 16 faces |
 | `candidates` | `false` | name the nearest subjects even below the threshold; only on a server started with `--allow-candidates` |
 
@@ -176,7 +176,8 @@ resembles whom.
 
 The largest face in the picture is compared with every template of the
 subject, and the best one counts. If the picture has no usable face the
-answer is `"verified": false` with a `reject` reason and no `score`. A
+answer is `"verified": false` with a `reject` reason and neither `score`
+nor `template`. A
 subject that is not enrolled is a `404`, decided before the picture is
 looked at.
 
@@ -317,7 +318,7 @@ A removal is on disk and out of the index when the answer arrives.
   "kernel": "neon",
   "thresholds": {"search": 0.6, "verify": 0.363},
   "gallery": {"subjects": 2, "templates": 2, "encrypted": false, "created": "2026-11-13T14:56:27.442125Z"},
-  "limits": {"max_body": 10485760, "max_inflight": 2, "queue": 16, "queue_timeout_ms": 100,
+  "limits": {"max_body": 10485760, "max_inflight": 2, "queue": 16, "queue_timeout_ms": 50,
              "max_templates": 10, "search_limit": 50, "candidates": false}
 }
 ```
@@ -354,9 +355,10 @@ metric carries a subject id.
 
 Analysing a picture uses every core it is given, so the server analyses only
 a few at a time (`--max-inflight`, 2 by default). A request that finds them
-all taken waits for its turn, but not for long: if the queue is already full
-(`--queue`, 8 per slot) or the wait exceeds `--queue-timeout` (100 ms), it
-is refused:
+all taken waits for its turn, but not for long. The server knows how long
+pictures have been taking and how many requests are ahead; one that could
+not expect a free slot within `--queue-timeout` (50 ms) is refused as it
+arrives, before its picture is even read:
 
 ```
 HTTP/1.1 429 Too Many Requests
@@ -370,10 +372,19 @@ again. The point of refusing is that the requests which are accepted stay
 fast: under twice the load it can carry, the server answers half the
 requests in the usual time instead of all of them late.
 
-Raise `--max-inflight` if `likeness_stage_duration_seconds` shows that
-requests spend their time in `queue` while the machine has cores to spare;
-lower it if `detect` and `embed` get slower as load grows. A longer
-`--queue-timeout` trades latency for fewer refusals during short bursts.
+`--queue-timeout` is the knob: the longest an accepted request waits, and
+so the price in latency of riding out a burst instead of refusing part of
+it. `--queue` (8 per slot) only bounds the line when that estimate has
+nothing to go by yet.
+
+`likeness bench` measures how many pictures this machine analyses at once
+before each one slows down, and says what to set `--max-inflight` to.
+`likeness load` drives a running server at rising rates and shows where it
+starts to refuse and what the accepted requests experience:
+
+```sh
+likeness load --url http://localhost:8080 --steps 10,20,40,80,160 face.jpg
+```
 
 ## Errors
 
@@ -395,6 +406,7 @@ a log. Some codes bring further fields, described where they occur.
 | 401 | `unauthorized` | no API key, or one the server does not know |
 | 403 | `forbidden` | the key may not do this |
 | 403 | `candidates_disabled` | `candidates=true` on a server that does not allow it |
+| 403 | `read_only` | the store was opened read-only: nothing can be enrolled or removed |
 | 404 | `subject_not_found`, `template_not_found` | |
 | 404 | `not_found` | no such path |
 | 405 | `method_not_allowed` | the `Allow` header lists what the path answers to |
@@ -456,7 +468,7 @@ its size, position or pose, before they were measured.
 | `--listen` | `127.0.0.1:8080` | address to listen on |
 | `--preset` | `default` | the models to use |
 | `--search-threshold`, `--verify-threshold` | the model's | similarities from which a face counts as a subject's |
-| `--max-inflight`, `--queue`, `--queue-timeout` | 2, 16, 100ms | see [When the server is busy](#when-the-server-is-busy) |
+| `--max-inflight`, `--queue`, `--queue-timeout` | 2, 16, 50ms | see [When the server is busy](#when-the-server-is-busy) |
 | `--tls-cert`, `--tls-key` | | serve HTTPS |
 | `--drain-delay` | 0 | keep serving this long after a stop signal while `/readyz` says 503 |
 | `--log-format`, `--log-level` | `text`, `info` | |

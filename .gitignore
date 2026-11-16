@@ -11,3 +11,6 @@ bench/facebench
 bench/dist/
 bin/
 coverage.out
+
+# what `go build ./cmd/likeness` leaves in the root
+/likeness
