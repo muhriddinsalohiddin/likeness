@@ -20,6 +20,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -455,8 +456,16 @@ func NewFloat32(dims ...int64) (*Tensor, error) {
 	if err := takeError(C.ortx_tensor_create(C.int(Float32), &cdims[0], C.size_t(len(cdims)), C.size_t(n*4), &t.data, &t.v)); err != nil {
 		return nil, err
 	}
+	liveTensors.Add(1)
 	return t, nil
 }
+
+// liveTensors counts the tensors made and not yet closed.
+var liveTensors atomic.Int64
+
+// LiveTensors is the number of tensors that exist. Their memory is outside
+// the Go heap, where nothing else would notice a leak; tests watch this.
+func LiveTensors() int { return int(liveTensors.Load()) }
 
 // Float32 returns the tensor's elements in row-major order. The slice is
 // valid until Close.
@@ -472,6 +481,7 @@ func (t *Tensor) Close() {
 	if t.v != nil {
 		C.ortx_value_release(t.v)
 		t.v = nil
+		liveTensors.Add(-1)
 	}
 	if t.data != nil {
 		C.ortx_free_aligned(t.data)

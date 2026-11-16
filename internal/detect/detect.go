@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sync"
 
 	"github.com/muhriddinsalohiddin/likeness/internal/align"
 	"github.com/muhriddinsalohiddin/likeness/internal/models"
@@ -56,7 +55,7 @@ type Detector struct {
 	sess   *ortx.Session
 	static int // fixed input side, 0 when the model accepts any
 	yunet  map[string]int
-	pool   sync.Pool
+	pool   ortx.Keep[worker]
 }
 
 type worker struct {
@@ -126,8 +125,16 @@ func (d *Detector) InputSize(o Options) int {
 	return min(max(o.Size, minSize), maxSize) &^ 31 // strides divide 32
 }
 
-// Close releases the model. It must not overlap with Detect.
-func (d *Detector) Close() { d.sess.Close() }
+// Close releases the model and the tensors of its workers. It must not
+// overlap with Detect.
+func (d *Detector) Close() {
+	d.pool.Drain(func(w *worker) {
+		for _, t := range w.tensors {
+			t.Close()
+		}
+	})
+	d.sess.Close()
+}
 
 // Detect finds the faces in img, best score first.
 func (d *Detector) Detect(img *vision.Image, o Options) ([]Face, error) {
@@ -144,7 +151,7 @@ func (d *Detector) Detect(img *vision.Image, o Options) ([]Face, error) {
 		iou = defaultNMS(d.m.Kind)
 	}
 
-	w, _ := d.pool.Get().(*worker)
+	w := d.pool.Get()
 	if w == nil {
 		w = &worker{tensors: map[int]*ortx.Tensor{}}
 	}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"sync"
 
 	"github.com/muhriddinsalohiddin/likeness/internal/align"
 	"github.com/muhriddinsalohiddin/likeness/internal/models"
@@ -28,7 +27,7 @@ type Embedder struct {
 	sess *ortx.Session
 	size int
 	dim  int
-	pool sync.Pool
+	pool ortx.Keep[worker]
 }
 
 type worker struct {
@@ -81,8 +80,12 @@ func (e *Embedder) Dim() int { return e.dim }
 // must never be compared.
 func (e *Embedder) Fingerprint() string { return e.m.Fingerprint() }
 
-// Close releases the model. It must not overlap with Embed.
-func (e *Embedder) Close() { e.sess.Close() }
+// Close releases the model and the tensors of its workers. It must not
+// overlap with Embed.
+func (e *Embedder) Close() {
+	e.pool.Drain(func(w *worker) { w.in.Close() })
+	e.sess.Close()
+}
 
 // CropSize is the side of the square aligned crop the model takes.
 func (e *Embedder) CropSize() int { return e.size }
@@ -142,7 +145,7 @@ func (e *Embedder) Embed(img *vision.Image, landmarks [5]align.Point, dst []floa
 }
 
 func (e *Embedder) worker() (*worker, error) {
-	if w, _ := e.pool.Get().(*worker); w != nil {
+	if w := e.pool.Get(); w != nil {
 		return w, nil
 	}
 	t, err := ortx.NewFloat32(1, 3, int64(e.size), int64(e.size))
