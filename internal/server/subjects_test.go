@@ -196,7 +196,7 @@ func TestInfo(t *testing.T) {
 		t.Errorf("gallery: %s", a.body)
 	}
 	l := got.Limits
-	if l.MaxBody != 10<<20 || l.MaxInflight != 3 || l.Queue != 24 || l.QueueTimeoutMS != 100 || l.MaxTemplates != 10 || l.SearchLimit != 50 || !l.Candidates {
+	if l.MaxBody != 10<<20 || l.MaxInflight != 3 || l.Queue != 24 || l.QueueTimeoutMS != 50 || l.MaxTemplates != 10 || l.SearchLimit != 50 || !l.Candidates {
 		t.Errorf("limits: %s", a.body)
 	}
 	r.get("/v1/info?pretty=1", searchKey).wantError(http.StatusBadRequest, "invalid_parameter")

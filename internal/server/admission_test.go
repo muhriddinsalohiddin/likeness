@@ -47,14 +47,14 @@ func TestLimiter(t *testing.T) {
 	}
 
 	time.Sleep(5 * time.Millisecond)
-	l.release()
+	l.release(0)
 	if got := <-second; got.err != nil || got.waited < 5*time.Millisecond {
 		t.Errorf("the queued request: %v after %v", got.err, got.waited)
 	}
 	if l.running() != 1 || l.queued() != 0 {
 		t.Errorf("%d running, %d queued", l.running(), l.queued())
 	}
-	l.release()
+	l.release(0)
 	l.leave()
 	if l.running() != 0 || l.inside.Load() != 0 {
 		t.Errorf("%d running, %d inside at the end", l.running(), l.inside.Load())
@@ -93,6 +93,69 @@ func TestLimiterGivesUp(t *testing.T) {
 	}
 }
 
+func TestLimiterRefusesWhatWouldWaitTooLong(t *testing.T) {
+	l := newLimiter(2, 100, 50*time.Millisecond)
+	ctx := context.Background()
+	hold := func() {
+		t.Helper()
+		if _, err := l.acquire(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// before any picture is done there is nothing to go by
+	hold()
+	hold()
+	if l.tooLong(100) {
+		t.Error("refusing on a guess")
+	}
+	// pictures turn out to take 40 ms: with two slots one comes free
+	// every 20 ms, so two requests can expect theirs within the 50 ms
+	l.release(40 * time.Millisecond)
+	l.release(40 * time.Millisecond)
+	hold()
+	hold()
+	queued := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := l.acquire(ctx)
+			queued <- err
+		}()
+	}
+	eventually(t, "two requests to queue", func() bool { return l.queued() == 2 })
+
+	// a third would wait 60 ms: it is told so at once, at the door and
+	// at the queue, though the queue has room for a hundred
+	start := time.Now()
+	if err := l.enter(); !errors.Is(err, errQueueFull) {
+		t.Errorf("entering: %v", err)
+	}
+	if _, err := l.acquire(ctx); !errors.Is(err, errQueueFull) {
+		t.Errorf("queueing: %v", err)
+	}
+	if took := time.Since(start); took > 25*time.Millisecond {
+		t.Errorf("being refused took %v", took)
+	}
+
+	// the two that were let in get their slots
+	l.release(40 * time.Millisecond)
+	l.release(40 * time.Millisecond)
+	for i := 0; i < 2; i++ {
+		if err := <-queued; err != nil {
+			t.Errorf("a queued request: %v", err)
+		}
+	}
+
+	// the estimate follows the pictures: once they are quick again,
+	// more requests may wait
+	for i := 0; i < 40; i++ {
+		l.typical.Store(l.typical.Load() + (int64(5*time.Millisecond)-l.typical.Load())/8)
+	}
+	if l.tooLong(10) || !l.tooLong(30) {
+		t.Errorf("after quick pictures the typical hold is %v", time.Duration(l.typical.Load()))
+	}
+}
+
 func TestLimiterWithoutAQueue(t *testing.T) {
 	l := newLimiter(2, 0, time.Minute)
 	for i := 0; i < 2; i++ {
@@ -106,7 +169,7 @@ func TestLimiterWithoutAQueue(t *testing.T) {
 	if err := l.enter(); !errors.Is(err, errQueueFull) {
 		t.Errorf("both slots taken and nowhere to wait: %v", err)
 	}
-	l.release()
+	l.release(0)
 	if err := l.enter(); err != nil {
 		t.Errorf("a slot is free again: %v", err)
 	}
@@ -153,7 +216,7 @@ func TestLimiterNeverExceedsItsSlots(t *testing.T) {
 			mu.Lock()
 			now--
 			mu.Unlock()
-			l.release()
+			l.release(0)
 		}()
 	}
 	wg.Wait()

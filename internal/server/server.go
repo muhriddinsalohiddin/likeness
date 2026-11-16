@@ -58,8 +58,9 @@ type Config struct {
 	// MaxInflight is how many pictures are analysed at the same time
 	// (default 2). Queue is how many more requests may wait for their turn
 	// (default 8 for each of those; negative for none) and QueueTimeout
-	// how long (default 100 ms). A request beyond either is refused with
-	// 429 rather than served late.
+	// how long (default 50 ms). A request that would wait longer, by how
+	// long pictures have been taking, is refused with 429 on arrival
+	// rather than served late.
 	MaxInflight  int
 	Queue        int
 	QueueTimeout time.Duration
@@ -82,7 +83,7 @@ type Config struct {
 const (
 	defaultInflight     = 2
 	queuePerSlot        = 8
-	defaultQueueTimeout = 100 * time.Millisecond
+	defaultQueueTimeout = 50 * time.Millisecond
 	defaultMaxBody      = 10 << 20
 	defaultMaxTemplates = 10
 

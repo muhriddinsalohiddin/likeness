@@ -57,7 +57,7 @@ func TestNewChecksTheConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := srv.cfg; c.MaxInflight != 2 || c.Queue != 16 || c.QueueTimeout != 100*time.Millisecond || c.MaxBody != 10<<20 ||
+	if c := srv.cfg; c.MaxInflight != 2 || c.Queue != 16 || c.QueueTimeout != 50*time.Millisecond || c.MaxBody != 10<<20 ||
 		c.MaxTemplates != 10 || c.SearchThreshold != 0.7 || c.VerifyThreshold != 0.5 || c.AllowCandidates {
 		t.Errorf("defaults: %+v", c)
 	}

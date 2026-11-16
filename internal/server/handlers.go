@@ -44,7 +44,8 @@ func (s *Server) analyse(ctx context.Context, c *call, picture []byte, o likenes
 		return nil, s.turnAway(err)
 	}
 	res, err := func() (*likeness.Result, error) {
-		defer s.limit.release()
+		start := time.Now()
+		defer func() { s.limit.release(time.Since(start)) }()
 		return s.cfg.Engine.Analyze(ctx, picture, o)
 	}()
 	if err != nil {
