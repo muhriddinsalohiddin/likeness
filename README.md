@@ -4,11 +4,12 @@ A face recognition server and Go library: send a picture, get back who it is.
 One binary, no Python, no OpenCV, and a search answer in well under 100 ms on an
 ordinary 8-core server without a GPU.
 
-> **Status: early development.** The server runs: `likeness serve` enrols
-> people from pictures and answers search and verification requests over
-> HTTP. What is still missing is the tooling around it — a command that
-> downloads the models, one that measures accuracy on your own pictures —
-> and the thresholds have not been calibrated yet. See the roadmap below.
+> **Status: early development.** The server runs, and so do the tools around
+> it: `likeness setup` fetches the models, `serve` answers search and
+> verification requests over HTTP, `enrol` imports people in bulk, `eval`
+> measures accuracy on your own pictures, `bench` and `load` measure speed.
+> What is missing is experience: the default thresholds have not been
+> calibrated on a public dataset yet, and nothing has run in production.
 
 ## Why
 
@@ -59,8 +60,9 @@ On the Xeon the light models sustain about 50 requests per second with p99 under
 - [x] embedded store with optional encryption at rest (package `store`)
 - [x] HTTP API: search, verify, enrol, manage (`likeness serve`,
       [docs/api.md](docs/api.md))
-- [ ] CLI: `setup`, `bench`, `eval`
-- [ ] thresholds measured on public data, load tests, a container image
+- [x] CLI: `setup`, `enrol`, `eval`, `bench`, `load`
+- [x] a Go client for the API (package `client`)
+- [ ] thresholds measured on public data, a container image
 
 Liveness detection, GPU execution providers and an approximate index for
 millions of faces are out of scope for 0.1.
@@ -217,9 +219,44 @@ models. The whole API is described in [docs/api.md](docs/api.md); in short:
 - **It can be operated.** Prometheus metrics, a timing breakdown in every
   answer, health endpoints, graceful shutdown, TLS, secrets read from files.
 
-`likeness setup`, which downloads the runtime library and the models, is not
-written yet. Until it is they have to be put under `$LIKENESS_HOME` by hand;
-`internal/models` has the URLs and checksums.
+## The command line
+
+```sh
+likeness setup                      # fetch the runtime library and the default models
+likeness enrol --store faces.db staff/   # staff/<id>/*.jpg: one directory per person
+likeness serve --store faces.db
+```
+
+| Command | |
+|---|---|
+| `setup` | downloads the ONNX Runtime library and a preset's models and checks every file against its SHA-256. `--list` prints the URLs and `--from DIR` installs from files carried over, for machines without internet access. |
+| `enrol` | enrols many people from pictures on disk straight into a store, under the same rules as the API, and writes a CSV saying what became of every picture. Running it again adds nothing twice. |
+| `serve` | the HTTP API. |
+| `eval` | takes a directory of labelled pictures (`person/picture.jpg`, the layout of LFW) and reports false match and false non-match rates, how often a search names the wrong person, and the thresholds to use for a gallery of a given size. |
+| `bench` | times each stage of a request on this machine and says how many pictures it can analyse at once: what to set `--max-inflight` to. |
+| `load` | sends searches to a running server at rising rates and shows where it starts to refuse and what the accepted requests experience. |
+
+Each explains itself with `-h`.
+
+## Calling it from Go
+
+```go
+c, err := client.New("https://faces.internal:8080", client.WithKey(key))
+if err != nil {
+	return err
+}
+res, err := c.Search(ctx, jpegBytes, client.SearchOptions{})
+if err != nil {
+	return err // a *client.Error with the API's code and the request id
+}
+if m := res.Best(); m != nil {
+	// m.Subject is in the picture, with similarity m.Score
+}
+```
+
+Package `client` needs only the standard library. It sends a request again
+when the server was too busy to take it, and never an enrolment that may
+already have gone through.
 
 ### Known limits
 
@@ -237,7 +274,8 @@ written yet. Until it is they have to be put under `$LIKENESS_HOME` by hand;
 - The thresholds are provisional. They are the ones the models' authors
   suggest, checked against a few test pictures; nobody has yet measured how
   often the default models take one of several thousand enrolled people for
-  another. Measure on your own pictures before you rely on a match.
+  another. Run `likeness eval` on your own pictures before you rely on a
+  match.
 - One server per store file: there is no shared store for replicas yet.
 
 ## Verified against the originals
